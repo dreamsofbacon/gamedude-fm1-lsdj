@@ -188,6 +188,8 @@ static int display_ready(void){
 }
 static void display_frame(void){lcd_blit(0,12,240,216,screen);}
 #include "fm1_game_lights.h"
+#include "fm1_lsdj_input.h"
+static lsdj_input_t lsdj_in;
 static void piano_lights(uint32_t held_actions){
     static uint32_t previous=UINT32_MAX;
     if(held_actions==previous)return;
@@ -197,6 +199,7 @@ static void piano_lights(uint32_t held_actions){
 }
 static void input_init(void){
     fm1_input_init();
+    lsdj_input_init(&lsdj_in);
     piano_lights(0);
     fm1_led_key(12,1); /* PLAY / Select */
     fm1_led_key(13,1); /* REC / Start */
@@ -205,6 +208,33 @@ static void input_init(void){
 static void audio_start(void){fm1_audio_init(dma,512,gb_isr_audio,3);}
 static void audio_stop(void){fm1_audio_stop();}
 #include "fm1_recovery.h"
+/* LSDj songs (cartridge RAM) in flash: loaded at boot, written on SAVE. */
+static int lsdj_fl_erase(uint32_t off){uint32_t took;return fl_erase4k(off,&took);}
+#define LSDJ_FL_ERASE(off) lsdj_fl_erase(off)
+#define LSDJ_FL_WRITE(off,p,n) fl_write(off,p,n)
+#define LSDJ_FL_READ(off,p,n) ota_fread(off,p,n)
+#define LSDJ_FL_IDLE() fm1_wdt_feed()
+#include "lsdj_save.h"
+#define SAVE_BUTTON 9u            /* BTN_SAVE */
+#define SAVE_STRIP_TICKS 36000000u /* 1.5 s at 24 MHz */
+static uint32_t save_strip_at;
+static void save_strip(int display_ok,uint16_t color){
+    if(!display_ok)return;
+    while(!display_ready())fm1_wdt_feed();
+    lcd_fill(0,0,240,10,color);
+}
+/* Blue strip while writing, green when saved, red on failure. Emulation and the
+   CPU1 video job stop meanwhile; the old save stays intact if anything fails. */
+static void lsdj_save_now(int display_ok){
+    if(gp_save_size()!=LSDJ_SAVE_DATA)return;
+    save_strip(display_ok,0x001fu);
+    video_stop();
+    int rc=recovery_flash_ok?lsdj_save_store(gp_save_data(),gp_save_size()):-8;
+    gp_save_clean();
+    video_start(0);
+    save_strip(display_ok,rc?0xf800u:0x07e0u);
+    save_strip_at=fm1_ticks()|1u;
+}
 #endif
 static void boot_splash(int display_ok){
     uint32_t start=fm1_ticks(),landed=0,landing_frame=0,landed_at=0,next_draw=0;
@@ -256,13 +286,25 @@ void gb_cstart(const uint32_t *parameters){
     /* Volatile header read: the public template's ROM slot is patched in the
        browser, so the compiler must not fold its original header bytes. */
     const volatile uint8_t *cart_header=cartridge;
+#ifdef CART_SPARSE_BANKS
+    /* Sparse cartridge (tools/build.py): only code + chosen kit banks are stored. */
+    (void)cart_header;gp_set_bank_map(cart_bank_map,CART_SPARSE_BANKS);
+    uint32_t cart_size=CART_SPARSE_BANKS*16384u;
+    if(gp_load(cartridge,cart_size)) {
+#else
     uint32_t cart_size=cart_header[0x148]<=4?(32768u<<cart_header[0x148]):0;
     if(!cart_size||cart_size>sizeof cartridge||gp_load(cartridge,cart_size)) {
+#endif
         /* Invalid embedded cartridge: allow bootguard/watchdog recovery. */
         for(;;);
     }
+#if !GB_SMK37
+    /* Before LSDj's first frame: it reads its songs from cartridge RAM at boot. */
+    lsdj_save_load(gp_save_data(),gp_save_size());
+#endif
     input_init();
 #if !GB_SMK37
+    fm1_led_key(SAVE_BUTTON,1);
     master_boot();
 #endif
     splash_active=1;ding_position=GD_DING_FRAMES;
@@ -278,18 +320,33 @@ void gb_cstart(const uint32_t *parameters){
         if(elapsed>=24000000){elapsed-=24000000;seconds++;}
         fm1_wdt_feed();
 #if !GB_SMK37
-        input_buttons=gp_input_keys(key_lo,key_hi);
-        piano_lights(input_buttons);
-        /* Measured FM-1 panel IDs: PLAY=12, REC=13. */
-        if(fm1_in.buttons&(1u<<12))input_buttons|=GP_SELECT;
-        if(fm1_in.buttons&(1u<<13))input_buttons|=GP_START;
-        input_seen|=input_buttons;gp_buttons(input_buttons);
         master_poll();
 #endif
         recovery_service();
+#if !GB_SMK37
+        {
+            static uint32_t prev_panel;
+            uint32_t panel=fm1_in.buttons;
+            if(panel&~prev_panel&(1u<<SAVE_BUTTON))lsdj_save_now(display_ok);
+            prev_panel=panel;
+            if(save_strip_at&&fm1_ticks()-save_strip_at>=SAVE_STRIP_TICKS&&(!display_ok||display_ready())){
+                if(display_ok)lcd_fill(0,0,240,10,0);
+                save_strip_at=0;
+            }
+        }
+#endif
         if(gp_audio_queued()<2955){
 #if GB_SMK37
             input_buttons=smk_input_frame();input_seen|=input_buttons;gp_buttons(input_buttons);
+#else
+            /* Once per emulated frame: knob taps are timed in frames.
+               Keys, PLAY=Select, REC=Start: src/fm1_lsdj_input.h. */
+            int32_t enc[FM1_NENC];
+            for(unsigned e=0;e<FM1_NENC;e++)enc[e]=fm1_enc_take(e);
+            input_buttons=lsdj_input_frame(&lsdj_in,key_lo,fm1_in.buttons,enc);
+            /* Note mode: every key light off. */
+            piano_lights(lsdj_in.mode==LSDJ_KEYS_NOTES?0xFFu:input_buttons);
+            input_seen|=input_buttons;gp_buttons(input_buttons);
 #endif
             gp_frame();
         }

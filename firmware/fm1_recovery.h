@@ -8,7 +8,10 @@
 #define FELUCCA_OTA_DRYRUN 0
 #define FELUCCA_ID "FM-1_937"
 #define RING_PUBLISH() __asm__ volatile("csync" ::: "memory")
-#define FL_RANGE_OK(off,n) FL_IN(off,n,0xe0000u,0xe5000u)
+/* The flash driver may also write the LSDj save slots (lsdj_save.h, 0x97000..0xD9000,
+   inside Felucca's data store); the updater below stays limited to OTA staging. */
+#define OTA_RANGE_OK(off,n) FL_IN(off,n,0xe0000u,0xe5000u)
+#define FL_RANGE_OK(off,n) (OTA_RANGE_OK(off,n)||FL_IN(off,n,0x97000u,0xd9000u))
 #include "fm1_flash.h"
 #include "../vendor/felucca/firmware/src/usb.c"
 #include "../vendor/felucca/firmware/src/ota.c"
@@ -17,11 +20,11 @@ static uint32_t ota_now_ms(void){return fm1_ms;}
 static void ota_idle(void){fm1_wdt_feed();}
 static int ota_erase(uint32_t off){
     uint32_t took;
-    if(!recovery_flash_ok||!FL_RANGE_OK(off,0x1000u)||(off&0xfffu))return -8;
+    if(!recovery_flash_ok||!OTA_RANGE_OK(off,0x1000u)||(off&0xfffu))return -8;
     return fl_erase4k(off,&took);
 }
 static int ota_prog(uint32_t off,const void *p,uint32_t n){
-    if(!recovery_flash_ok||!FL_RANGE_OK(off,n))return -8;
+    if(!recovery_flash_ok||!OTA_RANGE_OK(off,n))return -8;
     return fl_write(off,p,n);
 }
 static int ota_fread(uint32_t off,void *p,uint32_t n){

@@ -12,6 +12,8 @@ enum { GP_A=1, GP_B=2, GP_SELECT=4, GP_START=8, GP_RIGHT=16,
 enum { GP_OK=0, GP_SHORT=1, GP_COLOR=2, GP_ROM_SIZE=3, GP_RAM_SIZE=4,
        GP_CHECKSUM=5, GP_MAPPER=6, GP_CPU=7, GP_TIMEOUT=8 };
 int gp_load(const uint8_t *rom, uint32_t size);
+/* Sparse cartridge: call before gp_load, which then takes the logical size. */
+void gp_set_bank_map(const uint8_t *map, uint32_t banks);
 int gp_frame(void);
 void gp_buttons(uint32_t pressed);
 void gp_pause(uint32_t paused);

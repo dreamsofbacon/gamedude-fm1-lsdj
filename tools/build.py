@@ -25,6 +25,7 @@ def main():
     p.add_argument('--toolchain',default=os.environ.get('JIELI_TOOLCHAIN',DEFAULT_TC))
     p.add_argument('--rom',type=Path)
     p.add_argument('--rom-capacity',type=int,default=0,help='Reserve cartridge bytes for the browser ROM packer')
+    p.add_argument('--kits',type=int,default=None,help='Sparse cartridge (automatic above 512 KiB): LSDj kit banks to keep (default 3)')
     a=p.parse_args(); (ROOT/'build').mkdir(exist_ok=True);(ROOT/'web').mkdir(exist_ok=True)
     prepare(ROOT)
     includes=['-Isrc','-Ivendor/peanut-gb']
@@ -60,14 +61,40 @@ def main():
     (ROOT/'web/build.json').write_text(json.dumps({'sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'bytes':binary.stat().st_size})+'\n')
     print('Built',binary,binary.stat().st_size,'bytes')
 
+def sparse_pack(rom,kits):
+    """Store only the banks a large ROM needs: drop empty banks and keep the first `kits`
+    LSDj kit banks (signature 60 40); absent banks read as 0xff (an empty kit slot)."""
+    banks=[rom[i:i+16384] for i in range(0,len(rom),16384)]
+    stored=[];bank_map=[0xff]*len(banks);kept=0
+    for i,b in enumerate(banks):
+        if b.count(0xff)==len(b) or b.count(0)==len(b):continue
+        if b[:2]==b'\x60\x40':
+            if kept>=kits:continue
+            kept+=1
+        bank_map[i]=len(stored);stored.append(b)
+    assert bank_map[0]==0
+    # LSDj's first-boot cartridge test checks the header's global checksum (sum of all
+    # bytes but 0x14E/F), so recompute it for the ROM as the emulator will read it.
+    logical=b''.join(stored[s] if s!=0xff else b'\xff'*16384 for s in bank_map)
+    total=(sum(logical)-logical[0x14e]-logical[0x14f])&0xffff
+    bank0=bytearray(stored[0]);bank0[0x14e:0x150]=total.to_bytes(2,'big');stored[0]=bytes(bank0)
+    return b''.join(stored),bank_map,kept
+
 def native(a,sources):
     out=ROOT/'build'/a.target;out.mkdir(exist_ok=True)
     rom=rom_bytes(a.rom)
-    if len(rom)>512*1024:raise SystemExit('Hardware candidate supports ROMs up to 512 KiB; linker enforces total flash limit')
-    capacity=a.rom_capacity or len(rom)
-    if capacity<len(rom) or capacity>524288:raise SystemExit('Invalid cartridge capacity')
-    storage=rom+b'\xff'*(capacity-len(rom))
-    (out/'cartridge.h').write_text('/* Local cartridge; never publish game ROMs. */\nstatic const unsigned char cartridge[] = {\n'+
+    bank_map=None
+    if a.kits is not None or len(rom)>512*1024:
+        storage,bank_map,kept=sparse_pack(rom,3 if a.kits is None else a.kits)
+        capacity=len(storage)
+        print(f'Sparse cartridge: {len(storage)//16384} of {len(bank_map)} banks stored ({kept} kits), {capacity} bytes')
+    else:
+        capacity=a.rom_capacity or len(rom)
+        if capacity<len(rom) or capacity>524288:raise SystemExit('Invalid cartridge capacity')
+        storage=rom+b'\xff'*(capacity-len(rom))
+    sparse=('' if bank_map is None else f'#define CART_SPARSE_BANKS {len(bank_map)}u\n'
+            'static const unsigned char cart_bank_map[] = {'+','.join(map(str,bank_map))+'};\n')
+    (out/'cartridge.h').write_text('/* Local cartridge; never publish game ROMs. */\n'+sparse+'static const unsigned char cartridge[] = {\n'+
         ',\n'.join(','.join(str(b) for b in storage[i:i+32]) for i in range(0,len(storage),32))+'\n};\n')
     if a.target=='smk37':
         from build_smk_loader import build as build_loader

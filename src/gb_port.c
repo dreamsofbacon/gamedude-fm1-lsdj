@@ -47,9 +47,20 @@ static const uint16_t palettes[4][4] = {
     {0xe7da,0x9d50,0x5308,0x18e3}, {0xffff,0xad55,0x52aa,0},
     {0xffba,0xd42e,0x786d,0x2087}, {0xdfff,0x6e9c,0x3274,0x1108}
 };
+/* Optional sparse cartridge: bank_map[logical bank] = stored bank, 0xff = absent
+   (reads 0xff, e.g. an empty LSDj kit slot). Bank 0 must be stored first. */
+static const uint8_t *bank_map;
+static uint32_t bank_map_n;
 static uint8_t rom_read(struct gb_s *g, uint_fast32_t a) {
-    (void)g; return a < cart_size ? cart[a] : 0xff;
+    (void)g;
+    if (bank_map) {
+        uint32_t b = (uint32_t)a >> 14;
+        uint8_t s = b < bank_map_n ? bank_map[b] : 0xff;
+        return s == 0xff ? 0xff : cart[((uint32_t)s << 14) | (a & 0x3fff)];
+    }
+    return a < cart_size ? cart[a] : 0xff;
 }
+void gp_set_bank_map(const uint8_t *map, uint32_t banks) { bank_map = map; bank_map_n = banks; }
 static uint8_t ram_read(struct gb_s *g, uint_fast32_t a) {
     (void)g; return a < save_size ? save[a] : 0xff;
 }

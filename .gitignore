@@ -26,3 +26,7 @@ __pycache__/
 # Audited freely redistributable stock cartridges and corresponding source only.
 !/web/homebrew/*.gb
 !/web/homebrew/sources/gb-wordyl-1.0.8-e0f7440.zip
+
+# LSDj fork: never commit ROM-bearing packages or song files.
+*.fwsc
+*.lsdsng

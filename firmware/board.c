@@ -17,7 +17,20 @@ static volatile uint32_t scan_count,audio_count,key_lo,key_hi,audio_underruns;
 static uint32_t display_count;
 static uint32_t input_buttons,input_seen;
 static volatile uint32_t splash_active,ding_position;
+/* Flash speed test (board.c lsdj_flash_test_*): a steady 1 kHz sine replaces the
+   game audio, so any interrupt gap caused by a flash erase shows up as a jump in
+   the recorded tone; afterwards short beeps report the slowest erase in ms. */
+static volatile uint32_t tone_on,tone_phase;
+static int16_t tone_table[64]={   /* RAM (.data): 8000*sin(2*pi*k/64) */
+    0,784,1561,2322,3061,3771,4445,5075,5657,6184,6652,7055,7391,7656,7846,7961,8000,7961,7846,7656,7391,7055,6652,6184,5657,5075,4445,3771,3061,2322,1561,784,0,-784,-1561,-2322,-3061,-3771,-4445,-5075,-5657,-6184,-6652,-7055,-7391,-7656,-7846,-7961,-8000,-7961,-7846,-7656,-7391,-7055,-6652,-6184,-5657,-5075,-4445,-3771,-3061,-2322,-1561,-784};
 static void read_samples(void){
+    if(tone_on){
+        for(unsigned i=0;i<256;i++){
+            int16_t v=tone_table[tone_phase>>26];tone_phase+=97391549u;   /* 1000 Hz at 44.1 kHz */
+            samples[2*i]=samples[2*i+1]=v;
+        }
+        return;
+    }
     if(!splash_active){gp_audio_read(samples,256);return;}
     uint32_t p=ding_position;
     for(unsigned i=0;i<256;i++){
@@ -286,43 +299,64 @@ static void lsdj_autosave_poll(uint32_t held){
     last_save_ticks=fm1_ticks();
     retry_after=rc?AUTOSAVE_RETRY_TICKS:0;
 }
-/* Flash speed test (OCT- held + SAVE): erase 5 FREE pool sectors (never a saved
-   entry), one per second while emulation keeps running, and program one page
-   in each; then light one piano key per started millisecond of the slowest
-   erase (all 27 = 27 ms or more) for 4 s. Run it during playback to hear
-   whether an erase (interrupts off) clicks. */
-static uint32_t ftest_left,ftest_next,ftest_max_us,ftest_show_until;
+/* Flash speed test (OCT- held + SAVE), runs while emulation continues:
+   1 s of steady test tone (read_samples), then 5 rounds one second apart, each on
+   a FREE pool sector (never a saved entry): erase, program 16 pages, erase again.
+   1 s later the tone stops; then beeps report the slowest erase (one beep per
+   started millisecond) and, after a pause, the slowest page program (one beep per
+   started 0.1 ms). Record it from the line-out to hear any gap in the tone. */
+enum { FT_IDLE, FT_LEAD, FT_ROUNDS, FT_TAIL, FT_GAP, FT_BEEP_E, FT_PAUSE, FT_BEEP_P };
+static uint32_t ft_state,ft_next,ft_round,ft_erase_us,ft_prog_us,ft_beeps;
+static int ft_tone;
 static void lsdj_flash_test_start(void){
-    if(!recovery_flash_ok||ftest_left)return;
-    ftest_left=5;ftest_next=fm1_ticks();ftest_max_us=0;
-    fm1_led_key(SAVE_BUTTON,0);
+    if(!recovery_flash_ok||ft_state)return;
+    ft_state=FT_LEAD;ft_next=fm1_ticks()+24000000u;ft_round=0;ft_erase_us=ft_prog_us=0;
+    tone_phase=0;tone_on=1;fm1_led_key(SAVE_BUTTON,0);
 }
-static void lsdj_flash_test_poll(void){
-    uint32_t now=fm1_ticks();
-    if(ftest_show_until&&(int32_t)(now-ftest_show_until)>=0){
-        for(unsigned k=0;k<27;k++)fm1_led_key(14+k,0);
-        ftest_show_until=0;fm1_led_key(SAVE_BUTTON,1);
-    }
-    if(!ftest_left||(int32_t)(now-ftest_next)<0)return;
+static void lsdj_flash_test_round(void){
     lst_entry_t e[LST_KINDS];uint8_t owner[LST_SECTORS];
     lst_scan(e,owner);
-    uint32_t pick=LST_SECTORS,skip=5-ftest_left;
+    uint32_t pick=LST_SECTORS,skip=ft_round;
     for(uint32_t s=LST_SECTORS;s-->0;)if(!owner[s]&&skip--==0){pick=s;break;}
-    if(pick<LST_SECTORS){
-        uint32_t took=0;
-        if(!fl_erase4k(lst_sector_off(pick),&took)&&took>ftest_max_us)ftest_max_us=took;
-        static uint8_t zeros[256];
-        uint32_t f=irq_save(),ptook=0;
-        FL_FAR(fl_prog_ram)(lst_sector_off(pick),zeros,256,&ptook);
+    if(pick==LST_SECTORS)return;
+    uint32_t off=lst_sector_off(pick),took=0;
+    if(!fl_erase4k(off,&took)&&took>ft_erase_us)ft_erase_us=took;
+    static uint8_t zeros[256];
+    for(uint32_t pg=0;pg<16;pg++){
+        uint32_t f=irq_save(),pt=0;
+        int rc=FL_FAR(fl_prog_ram)(off+pg*256u,zeros,256u,&pt);
         irq_restore(f);
-        uint32_t t2=0;fl_erase4k(lst_sector_off(pick),&t2);  /* leave it erased */
-        if(t2>ftest_max_us)ftest_max_us=t2;
+        if(!rc&&pt>ft_prog_us)ft_prog_us=pt;
     }
-    ftest_next=now+24000000u;
-    if(--ftest_left==0){
-        uint32_t ms=(ftest_max_us+999u)/1000u;
-        for(unsigned k=0;k<27;k++)fm1_led_key(14+k,k<ms);
-        ftest_show_until=fm1_ticks()+96000000u;
+    took=0;
+    if(!fl_erase4k(off,&took)&&took>ft_erase_us)ft_erase_us=took;   /* leave it erased */
+}
+static void lsdj_flash_test_poll(void){
+    if(!ft_state)return;
+    uint32_t now=fm1_ticks();
+    if((int32_t)(now-ft_next)<0)return;
+    switch(ft_state){
+    case FT_LEAD: ft_state=FT_ROUNDS; ft_next=now; break;
+    case FT_ROUNDS:
+        lsdj_flash_test_round();
+        ft_next=now+24000000u;
+        if(++ft_round==5)ft_state=FT_TAIL;
+        break;
+    case FT_TAIL: tone_on=0; ft_state=FT_GAP; ft_next=now+24000000u; break;
+    case FT_GAP:
+        ft_beeps=(ft_erase_us+999u)/1000u; if(ft_beeps>60)ft_beeps=60; if(!ft_beeps)ft_beeps=1;
+        ft_state=FT_BEEP_E; ft_tone=0; ft_next=now; break;
+    case FT_BEEP_E: case FT_BEEP_P:
+        if(!ft_tone&&ft_beeps){tone_phase=0;tone_on=1;ft_tone=1;ft_next=now+2880000u;break;}  /* 120 ms on */
+        tone_on=0;ft_tone=0;
+        if(ft_beeps)ft_beeps--;
+        if(ft_beeps){ft_next=now+5520000u;break;}                                              /* 230 ms off */
+        if(ft_state==FT_BEEP_E){
+            ft_beeps=(ft_prog_us+99u)/100u; if(ft_beeps>60)ft_beeps=60; if(!ft_beeps)ft_beeps=1;
+            ft_state=FT_PAUSE; ft_next=now+36000000u; break;                                   /* 1.5 s */
+        }
+        ft_state=FT_IDLE; fm1_led_key(SAVE_BUTTON,1); break;
+    case FT_PAUSE: ft_state=FT_BEEP_P; ft_tone=0; ft_next=now; break;
     }
 }
 /* At boot, before LSDj's first frame: load the autosave (SAVE light blinks 3
@@ -437,7 +471,7 @@ void gb_cstart(const uint32_t *parameters){
             }
             prev_panel=panel;
             lsdj_flash_test_poll();
-            if(!ftest_left&&!ftest_show_until)lsdj_autosave_poll(panel|key_lo|key_hi);
+            if(!ft_state)lsdj_autosave_poll(panel|key_lo|key_hi);
         }
 #endif
         if(gp_audio_queued()<2955){

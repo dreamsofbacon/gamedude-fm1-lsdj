@@ -371,6 +371,59 @@ static void lsdj_save_boot(void){
     gp_save_take_blocks();   /* what was just loaded is saved */
     for(unsigned i=0;i<blinks;i++){fm1_led_key(SAVE_BUTTON,1);save_wait(4800000u);fm1_led_key(SAVE_BUTTON,0);save_wait(4800000u);}
 }
+/* LSDj .sav export/import from the web installer (web/lsdj/lsdj-save.js). */
+#include "lsdj_sysex.h"
+static lsdj_sx_t lsdj_sx;
+static uint8_t *sx_save(void){return gp_save_data();}
+static uint32_t sx_size(void){return gp_save_size();}
+static void sx_pause(int on){gp_pause((uint32_t)on);}
+/* Save all 32 blocks of cartridge RAM now, through the autosave store. LSDj is
+   paused, so the output is silent and erases are allowed. 0 = committed. */
+static int sx_store(const uint8_t *p,uint32_t n){
+    (void)p;(void)n;   /* always gp_save_data() */
+    if(!recovery_flash_ok)return -8;
+    uint32_t t0=fm1_ticks();int begun=0;
+    for(;;){
+        fm1_wdt_feed();
+        if(fm1_ticks()-t0>360000000u)return -2;   /* 15 s */
+        if(!ftl_busy(&ftl)){
+            if(begun)break;
+            /* -2: too few erased sectors yet; the silent ftl_step below erases one */
+            if(ftl_begin(&ftl,0xFFFFFFFFu)==0)begun=1;
+        }
+        if(ftl_step(&ftl,gp_save_data(),1)<0)return -1;
+    }
+    gp_save_take_blocks();   /* RAM and flash agree */
+    return 0;
+}
+/* Undo a failed import: reload the save committed at BEGIN. */
+static int sx_load(uint8_t *p,uint32_t n){(void)n;return ftl_boot(&ftl,p)?0:-1;}
+static void sx_reset(void){gp_reset();}
+static const lsdj_sx_io_t lsdj_sx_io={sx_save,sx_size,sx_pause,sx_store,sx_load,sx_reset};
+static int app_sysex_frame(const uint8_t *frame,uint32_t size){
+    if(ft_state||gp_save_size()!=FTL_BLOCKS*4096u||!lsdj_sx_match(frame,size))return 0;
+    static uint8_t reply[LSDJ_SX_REPLY_MAX];
+    ota_wire_send(reply,lsdj_sx_handle(&lsdj_sx,&lsdj_sx_io,frame,size,fm1_ms,reply));
+    return 1;
+}
+#ifdef LSDJ_SLOT_CAPACITY
+#include "lsdj_slot.h"
+/* LSDj template with nothing (amber) or a damaged ROM (red) in its slot.
+   USB stays up, so the web installer can still install LSDj. */
+static void lsdj_no_rom(int display_ok,int rc){
+    if(display_ok){
+        while(!display_ready())fm1_wdt_feed();
+        lcd_fill(0,0,240,240,0);lcd_fill(20,100,200,40,rc==LSDJ_SLOT_EMPTY?0xfd20u:0xf800u);
+    }
+    input_init();fm1_irq_enable_all();recovery_init();
+    uint32_t start=fm1_ticks();int healthy=0;
+    for(;;){
+        fm1_wdt_feed();recovery_service();
+        /* Up for 30 s: not a boot loop, so don't fall back to the update loader. */
+        if(!healthy&&fm1_ticks()-start>=720000000u){smk37_bootguard_healthy(&gb_bootguard);healthy=1;}
+    }
+}
+#endif
 #endif
 static void boot_splash(int display_ok){
     uint32_t start=fm1_ticks(),landed=0,landing_frame=0,landed_at=0,next_draw=0;
@@ -425,7 +478,15 @@ void gb_cstart(const uint32_t *parameters){
     /* Volatile header read: the public template's ROM slot is patched in the
        browser, so the compiler must not fold its original header bytes. */
     const volatile uint8_t *cart_header=cartridge;
-#ifdef CART_SPARSE_BANKS
+#if defined(LSDJ_SLOT_CAPACITY) && !GB_SMK37
+    /* LSDj template: the web installer writes the user's own LSDj into the slot. */
+    static lsdj_slot_t slot;
+    int slot_rc=lsdj_slot_parse(cart_header,LSDJ_SLOT_CAPACITY,&slot);
+    if(slot_rc)lsdj_no_rom(display_ok,slot_rc);
+    gp_set_bank_map(slot.bank_map,slot.logical_banks);
+    if(gp_load(cartridge+LSDJ_SLOT_HDR,slot.logical_banks*LSDJ_SLOT_BANK))lsdj_no_rom(display_ok,LSDJ_SLOT_BAD_DATA);
+    if(0){ /* lsdj_no_rom() never returns; shares the closing lines below */
+#elif defined(CART_SPARSE_BANKS)
     /* Sparse cartridge (tools/build.py): only code + chosen kit banks are stored. */
     (void)cart_header;gp_set_bank_map(cart_bank_map,CART_SPARSE_BANKS);
     uint32_t cart_size=CART_SPARSE_BANKS*16384u;
@@ -474,7 +535,9 @@ void gb_cstart(const uint32_t *parameters){
             }
             prev_panel=panel;
             lsdj_flash_test_poll();
-            if(!ft_state)lsdj_autosave_poll(panel|key_lo|key_hi,save_now);
+            /* No autosave while a .sav import is half-written into cartridge RAM. */
+            if(!ft_state&&!lsdj_sx.importing)lsdj_autosave_poll(panel|key_lo|key_hi,save_now);
+            lsdj_sx_poll(&lsdj_sx,&lsdj_sx_io,fm1_ms);
         }
 #endif
         if(gp_audio_queued()<2955){

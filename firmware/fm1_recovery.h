@@ -18,6 +18,8 @@
 #include "../vendor/felucca/firmware/src/usb.c"
 #include "../vendor/felucca/firmware/src/ota.c"
 static uint8_t recovery_flash_ok;
+/* board.c: handles the application's own SysEx frames (LSDj saves); 1 = handled. */
+static int app_sysex_frame(const uint8_t *frame,uint32_t size);
 static uint32_t ota_now_ms(void){return fm1_ms;}
 static void ota_idle(void){fm1_wdt_feed();}
 static int ota_erase(uint32_t off){
@@ -73,6 +75,8 @@ static void recovery_service(void){
         for(unsigned i=0;i<(version==1?16:version==2?21:sizeof values/sizeof values[0]);i++)
             for(unsigned j=0;j<5;j++)response[n++]=(uint8_t)((values[i]>>(j*7))&127);
         response[n++]=0xf7;ota_wire_send(response,n);
+    }else if(ota_frame_get(&request,&request_size)&&app_sysex_frame(request,request_size)){
+        ota_frame_done();
     }else ota_service();
     /* GameDude does not consume musical MIDI events. Keep that ring drained. */
     uint32_t f=irq_save();mi_r=mi_w;midi_in_overflow=0;irq_restore(f);

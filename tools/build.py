@@ -25,6 +25,7 @@ def main():
     p.add_argument('--toolchain',default=os.environ.get('JIELI_TOOLCHAIN',DEFAULT_TC))
     p.add_argument('--rom',type=Path)
     p.add_argument('--rom-capacity',type=int,default=0,help='Reserve cartridge bytes for the browser ROM packer')
+    p.add_argument('--lsdj-slot',type=int,default=None,metavar='BYTES',help='LSDj template: an empty (0xFF) ROM slot of this size, filled later by the web installer (tools/lsdj_template.py)')
     p.add_argument('--kits',type=int,default=None,help='Sparse cartridge (automatic above 512 KiB): LSDj kit banks to keep (default 3)')
     a=p.parse_args(); (ROOT/'build').mkdir(exist_ok=True);(ROOT/'web').mkdir(exist_ok=True)
     prepare(ROOT)
@@ -84,7 +85,11 @@ def native(a,sources):
     out=ROOT/'build'/a.target;out.mkdir(exist_ok=True)
     rom=rom_bytes(a.rom)
     bank_map=None
-    if a.kits is not None or len(rom)>512*1024:
+    if a.lsdj_slot is not None:
+        if a.target!='fm1' or a.rom or a.kits is not None or a.lsdj_slot<256:raise SystemExit('--lsdj-slot: FM-1 only, with no --rom/--kits')
+        capacity=a.lsdj_slot;storage=b'\xff'*capacity
+        print(f'LSDj template: empty {capacity}-byte ROM slot')
+    elif a.kits is not None or len(rom)>512*1024:
         storage,bank_map,kept=sparse_pack(rom,3 if a.kits is None else a.kits)
         capacity=len(storage)
         print(f'Sparse cartridge: {len(storage)//16384} of {len(bank_map)} banks stored ({kept} kits), {capacity} bytes')
@@ -92,7 +97,8 @@ def native(a,sources):
         capacity=a.rom_capacity or len(rom)
         if capacity<len(rom) or capacity>524288:raise SystemExit('Invalid cartridge capacity')
         storage=rom+b'\xff'*(capacity-len(rom))
-    sparse=('' if bank_map is None else f'#define CART_SPARSE_BANKS {len(bank_map)}u\n'
+    sparse=(f'#define LSDJ_SLOT_CAPACITY {capacity}u\n' if a.lsdj_slot is not None else
+            '' if bank_map is None else f'#define CART_SPARSE_BANKS {len(bank_map)}u\n'
             'static const unsigned char cart_bank_map[] = {'+','.join(map(str,bank_map))+'};\n')
     (out/'cartridge.h').write_text('/* Local cartridge; never publish game ROMs. */\n'+sparse+'static const unsigned char cartridge[] = {\n'+
         ',\n'.join(','.join(str(b) for b in storage[i:i+32]) for i in range(0,len(storage),32))+'\n};\n')
@@ -144,10 +150,11 @@ def native(a,sources):
       'dual_core':'CPU0 GB/APU/audio/input/USB; CPU1 display scaling; timeout/fault fallback',
       'sha256':hashlib.sha256(image).hexdigest(),'rom_bytes':len(rom),'rom_sha256':hashlib.sha256(rom).hexdigest(),
       'cartridge_offset':sym('cartridge')-0x2000120,'cartridge_capacity':capacity,
-      'cartridge':'original diagnostic' if a.rom is None else 'private user cartridge',
+      'cartridge':'empty LSDj slot' if a.lsdj_slot is not None else 'original diagnostic' if a.rom is None else 'private user cartridge',
       'flash_writes':'OTA staging 0xe0000..0xe5000 only' if a.target=='fm1' else False,
       'usb_updater':True,'save_persistence':'session RAM only'}
     result['app_bytes']=len(image)
+    if a.lsdj_slot is not None:result['lsdj_slot']=1
     if a.target=='smk37':result.update(usb_protocol='smk37-ram-v2',product=loader['product'],loader=loader)
     (out/'manifest.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 if __name__=='__main__':main()

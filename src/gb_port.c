@@ -13,7 +13,9 @@ void minigb_apu_render(struct minigb_apu_ctx *, audio_sample_t *, unsigned);
 static struct minigb_apu_ctx apu;
 static uint8_t audio_read(uint16_t addr) { return minigb_apu_audio_read(&apu, addr); }
 static uint32_t note_count;
+static void apu_catch_up(void);
 static void audio_write(uint16_t addr, uint8_t v) {
+    apu_catch_up();
     /* NRx4 with the trigger bit set: a note starts (autosave waits for silence). */
     if ((addr == 0xFF14 || addr == 0xFF19 || addr == 0xFF1E || addr == 0xFF23) && (v & 0x80)) note_count++;
     minigb_apu_audio_write(&apu, addr, v);
@@ -138,22 +140,44 @@ void gp_reset(void) {
     error=0; sample_acc=0; frames=0;
     gp_buttons(0);
 }
+/* Cycle-synced APU: before each APU register write, render the samples up to the
+   CPU's position in the frame. LSDj's kits rewrite wave RAM many times per frame;
+   rendering once per frame kept only the frame's last state (kicks lost their
+   pitch sweep, short hits vanished). Frames end at LY 144 (vblank). */
+static uint32_t frame_samples, rendered_samples;
+static void apu_catch_up(void) {
+#ifdef GP_NO_CATCHUP
+    return;
+#endif
+    if (!frame_samples) return;
+    uint32_t ly = gb.hram_io[IO_LY];
+    uint32_t cyc = ((ly + LCD_VERT_LINES - LCD_HEIGHT) % LCD_VERT_LINES) * LCD_LINE_CYCLES + gb.counter.lcd_count;
+    if (cyc > LCD_FRAME_CYCLES) cyc = LCD_FRAME_CYCLES;
+    uint32_t target = cyc * frame_samples / LCD_FRAME_CYCLES;   /* < 2^27: 32-bit */
+    if (target > rendered_samples) {
+        minigb_apu_render(&apu, pcm + rendered_samples * 2, target - rendered_samples);
+        rendered_samples = target;
+    }
+}
 int gp_frame(void) {
     if (!ready || error || paused) return 0;
     /* Backpressure: never advance and discard sound when the consumer stalls. */
     if (RING-gp_audio_queued()<740) return 0;
-    gb.gb_frame=0;
-    unsigned steps=0;
-    while (!gb.gb_frame && !error && steps++<80000) __gb_step_cpu(&gb);
-    if (error) return 0;
-    if (!gb.gb_frame) { error=GP_TIMEOUT; return 0; }
-    if (!(gb.hram_io[0x40]&0x80)) {
-        for (unsigned i=0;i<160*144;i++) pixels[i]=palettes[palette_id][0];
-    }
     /* Exact rational sample count: no fixed 738-sample-per-frame drift. */
     sample_acc += GB_PORT_RATE * 70224u;
     uint32_t count=sample_acc/4194304u; sample_acc%=4194304u;
-    minigb_apu_render(&apu,pcm,count);
+    frame_samples=count; rendered_samples=0;
+    gb.gb_frame=0;
+    unsigned steps=0;
+    while (!gb.gb_frame && !error && steps++<80000) __gb_step_cpu(&gb);
+    if (error) { frame_samples=0; return 0; }
+    if (!gb.gb_frame) { frame_samples=0; error=GP_TIMEOUT; return 0; }
+    if (!(gb.hram_io[0x40]&0x80)) {
+        for (unsigned i=0;i<160*144;i++) pixels[i]=palettes[palette_id][0];
+    }
+    if (rendered_samples < count)
+        minigb_apu_render(&apu, pcm + rendered_samples * 2, count - rendered_samples);
+    frame_samples=0;
     uint32_t w=write_pos;
     for (uint32_t i=0;i<count;i++) {
         ring[((w+i)&(RING-1))*2]=(int16_t)((int32_t)pcm[i*2]*(int32_t)volume/100);

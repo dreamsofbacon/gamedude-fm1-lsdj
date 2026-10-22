@@ -51,6 +51,8 @@ static uint32_t cart_size, save_size, dirty, error, ready, paused, frames;
 /* Cartridge RAM changes outside [ignore_lo, ignore_hi] (e.g. LSDj's play-time
    clock) count as real changes for the autosave. */
 static uint32_t ignore_lo = 1, ignore_hi = 0, dirty_sig, last_sig_frame;
+static uint32_t dirty_blocks;   /* bit b: 4 KiB block b of cart RAM had a real change */
+static uint32_t silent_frames;  /* consecutive frames whose output was exactly zero */
 static uint32_t sample_acc, palette_id, volume = 65;
 static char title[17];
 static const uint16_t palettes[4][4] = {
@@ -78,7 +80,7 @@ static void ram_write(struct gb_s *g, uint_fast32_t a, uint8_t v) {
     (void)g;
     if (a < save_size && save[a] != v) {
         save[a] = v; dirty = 1;
-        if (a < ignore_lo || a > ignore_hi) { dirty_sig = 1; last_sig_frame = frames; }
+        if (a < ignore_lo || a > ignore_hi) { dirty_sig = 1; last_sig_frame = frames; dirty_blocks |= 1u << ((uint32_t)a >> 12); }
     }
 }
 static void cpu_error(struct gb_s *g, enum gb_error_e e, uint16_t a) {
@@ -178,6 +180,11 @@ int gp_frame(void) {
     if (rendered_samples < count)
         minigb_apu_render(&apu, pcm + rendered_samples * 2, count - rendered_samples);
     frame_samples=0;
+    {   /* silence detector for the autosave: an erase is inaudible only in silence */
+        int quiet=1;
+        for (uint32_t i=0;i<count*2u;i++) if (pcm[i]) { quiet=0; break; }
+        silent_frames = quiet ? silent_frames + 1u : 0u;
+    }
     uint32_t w=write_pos;
     for (uint32_t i=0;i<count;i++) {
         ring[((w+i)&(RING-1))*2]=(int16_t)((int32_t)pcm[i*2]*(int32_t)volume/100);
@@ -202,12 +209,15 @@ uint16_t *gp_pixels(void) {return pixels;}
 uint8_t *gp_save_data(void) {return save;}
 uint32_t gp_save_size(void) {return save_size;}
 uint32_t gp_save_dirty(void) {return dirty;}
-void gp_save_clean(void) {dirty=0; dirty_sig=0;}
+void gp_save_clean(void) {dirty=0; dirty_sig=0; dirty_blocks=0;}
 void gp_save_ignore(uint32_t lo, uint32_t hi) {ignore_lo=lo; ignore_hi=hi;}
 uint32_t gp_save_dirty_sig(void) {return dirty_sig;}
-void gp_save_mark_dirty(void) {dirty=1; dirty_sig=1; last_sig_frame=frames;}
+void gp_save_mark_dirty(void) {dirty=1; dirty_sig=1; last_sig_frame=frames; dirty_blocks=0xFFFFFFFFu;}
 uint32_t gp_save_last_change(void) {return last_sig_frame;}
 uint32_t gp_note_count(void) {return note_count;}
+uint32_t gp_save_take_blocks(void) {uint32_t m=dirty_blocks; dirty_blocks=0; if(!m) dirty_sig=0; return m;}
+uint32_t gp_save_blocks(void) {return dirty_blocks;}
+uint32_t gp_silent_frames(void) {return silent_frames;}
 uint32_t gp_error(void) {return error;}
 uint32_t gp_frame_count(void) {return frames;}
 const char *gp_title(void) {return title;}

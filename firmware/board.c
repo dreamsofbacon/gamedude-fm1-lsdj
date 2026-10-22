@@ -216,6 +216,9 @@ static int lsdj_fl_erase(uint32_t off){uint32_t took;return fl_erase4k(off,&took
 #define LSDJ_FL_IDLE() fm1_wdt_feed()
 #include "lsdj_save.h"   /* v5 A/B save format: only read once, to import it */
 #include "lsdj_state.h"  /* compressed save store: the autosave (and later the slots) */
+/* Build-time check: the flash driver must accept the whole save pool (a narrower
+   range made autosaves that landed in the pool's top sectors fail silently). */
+typedef char lst_pool_inside_flash_range[FL_RANGE_OK(LST_POOL_LO,LST_POOL_HI-LST_POOL_LO)?1:-1];
 #define SAVE_BUTTON 9u            /* BTN_SAVE */
 #define SAVE_HOLD_TICKS 36000000u /* 1.5 s at 24 MHz */
 #define LSDJ_STATE_BUILD 1u       /* cartridge-RAM-only autosave: any build loads it */

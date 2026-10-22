@@ -8,10 +8,10 @@
 #define FELUCCA_OTA_DRYRUN 0
 #define FELUCCA_ID "FM-1_937"
 #define RING_PUBLISH() __asm__ volatile("csync" ::: "memory")
-/* The flash driver may also write the LSDj save slots (lsdj_save.h, 0x97000..0xD9000,
-   inside Felucca's data store); the updater below stays limited to OTA staging. */
+/* The flash driver may also write the LSDj save pool (lsdj_state.h, 0x97000..0xE0000 =
+   Felucca's data store, FL_DATA); the updater below stays limited to OTA staging. */
 #define OTA_RANGE_OK(off,n) FL_IN(off,n,0xe0000u,0xe5000u)
-#define FL_RANGE_OK(off,n) (OTA_RANGE_OK(off,n)||FL_IN(off,n,0x97000u,0xd9000u))
+#define FL_RANGE_OK(off,n) (OTA_RANGE_OK(off,n)||FL_IN(off,n,0x97000u,0xe0000u))
 #include "fm1_flash.h"
 #include "../vendor/felucca/firmware/src/usb.c"
 #include "../vendor/felucca/firmware/src/ota.c"

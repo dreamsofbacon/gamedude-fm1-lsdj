@@ -216,24 +216,41 @@ static int lsdj_fl_erase(uint32_t off){uint32_t took;return fl_erase4k(off,&took
 #define LSDJ_FL_IDLE() fm1_wdt_feed()
 #include "lsdj_save.h"
 #define SAVE_BUTTON 9u            /* BTN_SAVE */
-#define SAVE_STRIP_TICKS 36000000u /* 1.5 s at 24 MHz */
-static uint32_t save_strip_at;
-static void save_strip(int display_ok,uint16_t color){
+#define SAVE_HOLD_TICKS 36000000u /* 1.5 s at 24 MHz */
+static void save_wait(uint32_t ticks){uint32_t t=fm1_ticks();while(fm1_ticks()-t<ticks)fm1_wdt_feed();}
+static void save_screen(int display_ok,uint16_t color){
     if(!display_ok)return;
     while(!display_ready())fm1_wdt_feed();
-    lcd_fill(0,0,240,10,color);
+    lcd_fill(0,0,240,240,color);
 }
-/* Blue strip while writing, green when saved, red on failure. Emulation and the
-   CPU1 video job stop meanwhile; the old save stays intact if anything fails. */
+/* Diagnostic feedback (v5): the SAVE light goes off as soon as the press is seen,
+   the whole screen is blue while writing, then green (saved) or red (failed) for
+   1.5 s. On failure the first N piano-key lights show the step that failed:
+   1 = wrong cart RAM size, 2 = erase, 3 = program, 4/5 = read-back, 6/7 = header,
+   8 = flash chip not ready. The old save stays intact if anything fails. */
 static void lsdj_save_now(int display_ok){
-    if(gp_save_size()!=LSDJ_SAVE_DATA)return;
-    save_strip(display_ok,0x001fu);
-    video_stop();
-    int rc=recovery_flash_ok?lsdj_save_store(gp_save_data(),gp_save_size()):-8;
-    gp_save_clean();
-    video_start(0);
-    save_strip(display_ok,rc?0xf800u:0x07e0u);
-    save_strip_at=fm1_ticks()|1u;
+    fm1_led_key(SAVE_BUTTON,0);
+    int rc;
+    if(gp_save_size()!=LSDJ_SAVE_DATA)rc=-1;
+    else{
+        save_screen(display_ok,0x001fu);
+        video_stop();
+        rc=recovery_flash_ok?lsdj_save_store(gp_save_data(),gp_save_size()):-8;
+        gp_save_clean();
+        video_start(0);
+    }
+    save_screen(display_ok,rc?0xf800u:0x07e0u);
+    unsigned code=rc<0?(unsigned)-rc:0u;
+    for(unsigned k=0;k<27;k++)fm1_led_key(14+k,k<code);
+    save_wait(SAVE_HOLD_TICKS);
+    for(unsigned k=0;k<27;k++)fm1_led_key(14+k,0);
+    save_screen(display_ok,0);
+    fm1_led_key(SAVE_BUTTON,1);
+}
+/* At boot: blink the SAVE light 3 times when a save was loaded. */
+static void lsdj_save_boot(void){
+    if(!lsdj_save_load(gp_save_data(),gp_save_size()))return;
+    for(unsigned i=0;i<3;i++){fm1_led_key(SAVE_BUTTON,1);save_wait(4800000u);fm1_led_key(SAVE_BUTTON,0);save_wait(4800000u);}
 }
 #endif
 static void boot_splash(int display_ok){
@@ -298,17 +315,18 @@ void gb_cstart(const uint32_t *parameters){
         /* Invalid embedded cartridge: allow bootguard/watchdog recovery. */
         for(;;);
     }
-#if !GB_SMK37
-    /* Before LSDj's first frame: it reads its songs from cartridge RAM at boot. */
-    lsdj_save_load(gp_save_data(),gp_save_size());
-#endif
     input_init();
 #if !GB_SMK37
-    fm1_led_key(SAVE_BUTTON,1);
     master_boot();
 #endif
     splash_active=1;ding_position=GD_DING_FRAMES;
     audio_start();fm1_irq_enable_all();
+#if !GB_SMK37
+    /* Before LSDj's first frame (after the splash): it reads its songs from
+       cartridge RAM at boot. Needs the panel scan running for the light blinks. */
+    lsdj_save_boot();
+    fm1_led_key(SAVE_BUTTON,1);
+#endif
     boot_splash(display_ok);
     for(unsigned i=0;i<4;i++)gp_frame();
     splash_active=0;
@@ -329,10 +347,6 @@ void gb_cstart(const uint32_t *parameters){
             uint32_t panel=fm1_in.buttons;
             if(panel&~prev_panel&(1u<<SAVE_BUTTON))lsdj_save_now(display_ok);
             prev_panel=panel;
-            if(save_strip_at&&fm1_ticks()-save_strip_at>=SAVE_STRIP_TICKS&&(!display_ok||display_ready())){
-                if(display_ok)lcd_fill(0,0,240,10,0);
-                save_strip_at=0;
-            }
         }
 #endif
         if(gp_audio_queued()<2955){

@@ -214,31 +214,48 @@ static int lsdj_fl_erase(uint32_t off){uint32_t took;return fl_erase4k(off,&took
 #define LSDJ_FL_WRITE(off,p,n) fl_write(off,p,n)
 #define LSDJ_FL_READ(off,p,n) ota_fread(off,p,n)
 #define LSDJ_FL_IDLE() fm1_wdt_feed()
-#include "lsdj_save.h"
+#include "lsdj_save.h"   /* v5 A/B save format: only read once, to import it */
+#include "lsdj_state.h"  /* compressed save store: the autosave (and later the slots) */
 #define SAVE_BUTTON 9u            /* BTN_SAVE */
 #define SAVE_HOLD_TICKS 36000000u /* 1.5 s at 24 MHz */
+#define LSDJ_STATE_BUILD 1u       /* cartridge-RAM-only autosave: any build loads it */
+/* LSDj 9.3.9 updates its play-time clock in cartridge RAM about once a minute;
+   that alone is not a reason to autosave (it is saved with the next real change). */
+#define LSDJ_CLOCK_LO 0x3FB3u
+#define LSDJ_CLOCK_HI 0x3FB8u
+#define AUTOSAVE_QUIET_FRAMES 180u   /* 3 s after the last real change */
+#define AUTOSAVE_SILENT_FRAMES 120u  /* 2 s without a note starting */
+#define AUTOSAVE_MIN_TICKS 480000000u /* at least 20 s between autosaves */
+#define AUTOSAVE_RETRY_TICKS 1440000000u /* 60 s after a failed autosave */
+static int save_display_ok;
 static void save_wait(uint32_t ticks){uint32_t t=fm1_ticks();while(fm1_ticks()-t<ticks)fm1_wdt_feed();}
 static void save_screen(int display_ok,uint16_t color){
     if(!display_ok)return;
     while(!display_ready())fm1_wdt_feed();
     lcd_fill(0,0,240,240,color);
 }
-/* Diagnostic feedback (v5): the SAVE light goes off as soon as the press is seen,
-   the whole screen is blue while writing, then green (saved) or red (failed) for
-   1.5 s. On failure the first N piano-key lights show the step that failed:
-   1 = wrong cart RAM size, 2 = erase, 3 = program, 4/5 = read-back, 6/7 = header,
-   8 = flash chip not ready. The old save stays intact if anything fails. */
+/* Write cartridge RAM to the store as the autosave. Emulation and the CPU1 video job
+   stop meanwhile; the compressor borrows the scaled-screen buffer as its workspace,
+   which the next video frame redraws. The previous autosave stays intact on failure. */
+static int lsdj_store_save(void){
+    if(!recovery_flash_ok)return -8;
+    lst_region_t r={gp_save_data(),gp_save_size()};
+    video_stop();
+    if(save_display_ok)while(!display_ready())fm1_wdt_feed();  /* LCD done reading screen[] */
+    int rc=lst_save(LST_AUTO,&r,1,LSDJ_STATE_BUILD,screen,lsdj_save_buf);
+    if(!rc)gp_save_clean();
+    memset(screen,0,sizeof screen);
+    video_start(0);
+    return rc;
+}
+/* SAVE button: save now. The SAVE light goes off when the press is seen, the
+   screen is blue while writing, then green (saved) or red (failed) for 1.5 s; on
+   failure N piano-key lights show why: 1 = full, 3 = flash, 4 = verify,
+   5 = format, 8 = flash chip not ready. */
 static void lsdj_save_now(int display_ok){
     fm1_led_key(SAVE_BUTTON,0);
-    int rc;
-    if(gp_save_size()!=LSDJ_SAVE_DATA)rc=-1;
-    else{
-        save_screen(display_ok,0x001fu);
-        video_stop();
-        rc=recovery_flash_ok?lsdj_save_store(gp_save_data(),gp_save_size()):-8;
-        gp_save_clean();
-        video_start(0);
-    }
+    save_screen(display_ok,0x001fu);
+    int rc=lsdj_store_save();
     save_screen(display_ok,rc?0xf800u:0x07e0u);
     unsigned code=rc<0?(unsigned)-rc:0u;
     for(unsigned k=0;k<27;k++)fm1_led_key(14+k,k<code);
@@ -247,10 +264,32 @@ static void lsdj_save_now(int display_ok){
     save_screen(display_ok,0);
     fm1_led_key(SAVE_BUTTON,1);
 }
-/* At boot: blink the SAVE light 3 times when a save was loaded. */
+/* Autosave: after a real change, once things are quiet (no change for 3 s, no
+   note for 2 s, no key held) and at least 20 s after the previous autosave. The
+   SAVE light goes off while it writes. Called once per main-loop pass. */
+static void lsdj_autosave_poll(uint32_t held){
+    static uint32_t seen_notes,last_note_frame,last_save_ticks,retry_after,have_saved;
+    uint32_t f=gp_frame_count(),now=fm1_ticks();
+    if(gp_note_count()!=seen_notes){seen_notes=gp_note_count();last_note_frame=f;}
+    if(!gp_save_dirty_sig()||held)return;
+    if(f-gp_save_last_change()<AUTOSAVE_QUIET_FRAMES||f-last_note_frame<AUTOSAVE_SILENT_FRAMES)return;
+    if(have_saved&&now-last_save_ticks<AUTOSAVE_MIN_TICKS)return;
+    if(retry_after&&now-last_save_ticks<retry_after)return;
+    fm1_led_key(SAVE_BUTTON,0);
+    int rc=lsdj_store_save();
+    fm1_led_key(SAVE_BUTTON,1);
+    last_save_ticks=fm1_ticks();have_saved=1;
+    retry_after=rc?AUTOSAVE_RETRY_TICKS:0;
+}
+/* At boot, before LSDj's first frame: load the autosave (SAVE light blinks 3
+   times); without one, import a v5 save (blinks twice) and autosave it soon. */
 static void lsdj_save_boot(void){
-    if(!lsdj_save_load(gp_save_data(),gp_save_size()))return;
-    for(unsigned i=0;i<3;i++){fm1_led_key(SAVE_BUTTON,1);save_wait(4800000u);fm1_led_key(SAVE_BUTTON,0);save_wait(4800000u);}
+    gp_save_ignore(LSDJ_CLOCK_LO,LSDJ_CLOCK_HI);
+    lst_region_t r={gp_save_data(),gp_save_size()};
+    unsigned blinks=0;
+    if(lst_load(LST_AUTO,&r,1,LSDJ_STATE_BUILD,(uint8_t*)screen,lsdj_save_buf,NULL)==LST_OK)blinks=3;
+    else if(lsdj_save_load(gp_save_data(),gp_save_size())){gp_save_mark_dirty();blinks=2;}
+    for(unsigned i=0;i<blinks;i++){fm1_led_key(SAVE_BUTTON,1);save_wait(4800000u);fm1_led_key(SAVE_BUTTON,0);save_wait(4800000u);}
 }
 #endif
 static void boot_splash(int display_ok){
@@ -300,6 +339,9 @@ void gb_cstart(const uint32_t *parameters){
 #endif
     fm1_irq_init();fm1_mailbox_clear();
     int display_ok=display_init();
+#if !GB_SMK37
+    save_display_ok=display_ok;
+#endif
     /* Volatile header read: the public template's ROM slot is patched in the
        browser, so the compiler must not fold its original header bytes. */
     const volatile uint8_t *cart_header=cartridge;
@@ -347,6 +389,7 @@ void gb_cstart(const uint32_t *parameters){
             uint32_t panel=fm1_in.buttons;
             if(panel&~prev_panel&(1u<<SAVE_BUTTON))lsdj_save_now(display_ok);
             prev_panel=panel;
+            lsdj_autosave_poll(panel|key_lo|key_hi);
         }
 #endif
         if(gp_audio_queued()<2955){

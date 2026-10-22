@@ -12,7 +12,12 @@
 void minigb_apu_render(struct minigb_apu_ctx *, audio_sample_t *, unsigned);
 static struct minigb_apu_ctx apu;
 static uint8_t audio_read(uint16_t addr) { return minigb_apu_audio_read(&apu, addr); }
-static void audio_write(uint16_t addr, uint8_t v) { minigb_apu_audio_write(&apu, addr, v); }
+static uint32_t note_count;
+static void audio_write(uint16_t addr, uint8_t v) {
+    /* NRx4 with the trigger bit set: a note starts (autosave waits for silence). */
+    if ((addr == 0xFF14 || addr == 0xFF19 || addr == 0xFF1E || addr == 0xFF23) && (v & 0x80)) note_count++;
+    minigb_apu_audio_write(&apu, addr, v);
+}
 #define ENABLE_SOUND 1
 #define PEANUT_GB_12_COLOUR 0
 #define PEANUT_GB_IS_LITTLE_ENDIAN 1
@@ -41,6 +46,9 @@ static int16_t pcm[740*2];
 static volatile uint32_t write_pos, read_pos;
 static const uint8_t *cart;
 static uint32_t cart_size, save_size, dirty, error, ready, paused, frames;
+/* Cartridge RAM changes outside [ignore_lo, ignore_hi] (e.g. LSDj's play-time
+   clock) count as real changes for the autosave. */
+static uint32_t ignore_lo = 1, ignore_hi = 0, dirty_sig, last_sig_frame;
 static uint32_t sample_acc, palette_id, volume = 65;
 static char title[17];
 static const uint16_t palettes[4][4] = {
@@ -65,7 +73,11 @@ static uint8_t ram_read(struct gb_s *g, uint_fast32_t a) {
     (void)g; return a < save_size ? save[a] : 0xff;
 }
 static void ram_write(struct gb_s *g, uint_fast32_t a, uint8_t v) {
-    (void)g; if (a < save_size && save[a] != v) { save[a] = v; dirty = 1; }
+    (void)g;
+    if (a < save_size && save[a] != v) {
+        save[a] = v; dirty = 1;
+        if (a < ignore_lo || a > ignore_hi) { dirty_sig = 1; last_sig_frame = frames; }
+    }
 }
 static void cpu_error(struct gb_s *g, enum gb_error_e e, uint16_t a) {
     (void)e; (void)a; error = GP_CPU; g->gb_frame = 1;
@@ -75,7 +87,7 @@ static void line(struct gb_s *g, const uint8_t *p, const uint_fast8_t y) {
     for (unsigned x=0;x<160;x++) pixels[y*160+x]=palettes[palette_id][p[x]&3];
 }
 int gp_load(const uint8_t *rom, uint32_t n) {
-    ready=0; error=0; paused=0; frames=0; dirty=0; save_size=0;
+    ready=0; error=0; paused=0; frames=0; dirty=0; dirty_sig=0; save_size=0;
     title[0]=0; cart=0; cart_size=0; write_pos=read_pos=0;
     memset(pixels,0,sizeof pixels);
     if (!rom || n<0x150) return error=GP_SHORT;
@@ -166,7 +178,12 @@ uint16_t *gp_pixels(void) {return pixels;}
 uint8_t *gp_save_data(void) {return save;}
 uint32_t gp_save_size(void) {return save_size;}
 uint32_t gp_save_dirty(void) {return dirty;}
-void gp_save_clean(void) {dirty=0;}
+void gp_save_clean(void) {dirty=0; dirty_sig=0;}
+void gp_save_ignore(uint32_t lo, uint32_t hi) {ignore_lo=lo; ignore_hi=hi;}
+uint32_t gp_save_dirty_sig(void) {return dirty_sig;}
+void gp_save_mark_dirty(void) {dirty=1; dirty_sig=1; last_sig_frame=frames;}
+uint32_t gp_save_last_change(void) {return last_sig_frame;}
+uint32_t gp_note_count(void) {return note_count;}
 uint32_t gp_error(void) {return error;}
 uint32_t gp_frame_count(void) {return frames;}
 const char *gp_title(void) {return title;}

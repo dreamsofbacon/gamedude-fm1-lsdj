@@ -268,7 +268,7 @@ static void lsdj_save_now(int display_ok){
 }
 /* Autosave: after a real change, once things are quiet (no change for 3 s, no
    note for 2 s, no key held). The SAVE light goes off for at least 0.5 s so a
-   save is easy to see. Called once per main-loop pass. */
+   save is easy to see; a failed save blinks it fast 5 times (retry after 60 s). Called once per main-loop pass. */
 #define AUTOSAVE_LED_TICKS 12000000u   /* 0.5 s */
 static void lsdj_autosave_poll(uint32_t held){
     static uint32_t seen_notes,last_note_frame,last_save_ticks,retry_after,led_off;
@@ -280,6 +280,9 @@ static void lsdj_autosave_poll(uint32_t held){
     if(retry_after&&now-last_save_ticks<retry_after)return;
     fm1_led_key(SAVE_BUTTON,0);led_off=1;
     int rc=lsdj_store_save();
+    if(rc){   /* never fail silently: blink the SAVE light fast 5 times */
+        for(unsigned i=0;i<5;i++){fm1_led_key(SAVE_BUTTON,1);save_wait(1200000u);fm1_led_key(SAVE_BUTTON,0);save_wait(1200000u);}
+    }
     last_save_ticks=fm1_ticks();
     retry_after=rc?AUTOSAVE_RETRY_TICKS:0;
 }

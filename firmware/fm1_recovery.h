@@ -6,9 +6,9 @@
 #define FELUCCA_CDC 0
 #define FELUCCA_UAC 0
 #define FELUCCA_OTA_DRYRUN 0
-/* Package identity, reported to M-UPGRADE, which only installs a newer number:
-   LSDj alpha N is FM-1_9NNN (alpha 12 = FM-1_9012). Bump for every release. */
-#define FELUCCA_ID "FM-1_9012"
+/* Package identity, reported to M-UPGRADE: "FM-1_" + exactly 3 digits (4 = "incompatible"),
+   newer number to update in place. LSDj alpha N = FM-1_9NN (alpha 12 = FM-1_912). Bump per release. */
+#define FELUCCA_ID "FM-1_912"
 #define RING_PUBLISH() __asm__ volatile("csync" ::: "memory")
 /* The flash driver may also write the LSDj save pool (lsdj_state.h, 0x97000..0xE0000 =
    Felucca's data store, FL_DATA); the updater below stays limited to OTA staging. */

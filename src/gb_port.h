@@ -37,6 +37,9 @@ uint32_t gp_note_count(void);
 uint32_t gp_save_take_blocks(void);
 uint32_t gp_save_blocks(void);
 uint32_t gp_silent_frames(void);
+/* Software PS/2 keyboard on the link port (LSDj SYNC=KEYBD): queue one key code. */
+void gp_keybd_send(uint8_t code);
+uint32_t gp_keybd_pending(void);
 void gp_audio_read(int16_t *out, uint32_t frames);
 uint32_t gp_audio_queued(void);
 uint32_t gp_error(void);

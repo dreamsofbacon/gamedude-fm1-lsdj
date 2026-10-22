@@ -30,10 +30,10 @@
 #ifndef LSDJ_ENC_KNOB4
 #define LSDJ_ENC_KNOB4     5   /* ENC_KNOB4 */
 #endif
-/* BTN_HOME is 8, but note mode has no KEYBD path yet, so a HOME press would
-   only make the keys go dead: keep the toggle off until LSDJ_KEYBD_NOTE exists. */
+/* HOME toggles the piano keys between button mode and note mode (LSDj keyboard,
+   PROJECT > SYNC = KEYBD). */
 #ifndef LSDJ_BTN_HOME
-#define LSDJ_BTN_HOME      (-1)
+#define LSDJ_BTN_HOME      8   /* BTN_HOME */
 #endif
 #define LSDJ_BTN_OCT_DOWN  0   /* FM1_BTN_OCT_DOWN */
 #define LSDJ_BTN_OCT_UP    1   /* FM1_BTN_OCT_UP */

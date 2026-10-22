@@ -201,7 +201,27 @@ static int display_ready(void){
 }
 static void display_frame(void){lcd_blit(0,12,240,216,screen);}
 #include "fm1_game_lights.h"
+/* Note mode: piano keys -> LSDj keyboard (PROJECT > SYNC = KEYBD) through the
+   software PS/2 link port in gb_port.c. Mapping as Arduinoboy / RetroPlug: MIDI note
+   48 = LSDj keyboard C, two rows of note keys, LSDj's octave keys slide its octave
+   to the note's; key presses only (LSDj's keyboard has no note-off). Notes below 48
+   are ignored, so low keys never turn into LSDj's mute/cursor commands. */
+static void lsdj_keybd_note(int note,int on);
+#define LSDJ_KEYBD_NOTE(n,on) lsdj_keybd_note((n),(on))
 #include "fm1_lsdj_input.h"
+static const uint8_t kb_note_map[24]={0x1A,0x1B,0x22,0x23,0x21,0x2A,0x34,0x32,0x33,0x31,0x3B,0x3A,
+                                      0x15,0x1E,0x1D,0x26,0x24,0x2D,0x2E,0x2C,0x36,0x35,0x3D,0x3C};
+#define KB_OCT_DN 0x05u   /* F1 */
+#define KB_OCT_UP 0x06u   /* F2 */
+static int kb_octave=-1;  /* LSDj's keyboard octave as we last set it; -1 = not synced yet */
+static void lsdj_keybd_note(int note,int on){
+    if(!on||note<48)return;
+    if(kb_octave<0){for(int i=0;i<5;i++)gp_keybd_send(KB_OCT_DN);kb_octave=0;}  /* clamp to 0, as Arduinoboy */
+    int n=note-48,oct=n/12;
+    while(kb_octave<oct){gp_keybd_send(KB_OCT_UP);kb_octave++;}
+    while(kb_octave>oct){gp_keybd_send(KB_OCT_DN);kb_octave--;}
+    gp_keybd_send(kb_note_map[n>=0x3C?(n%12)+12:n%12]);
+}
 static lsdj_input_t lsdj_in;
 static void piano_lights(uint32_t held_actions){
     static uint32_t previous=UINT32_MAX;

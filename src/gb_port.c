@@ -161,6 +161,46 @@ static void apu_catch_up(void) {
         rendered_samples = target;
     }
 }
+/* Software PS/2 keyboard on the link port (LSDj SYNC=KEYBD). LSDj reads a PS/2
+   keyboard through the 8-bit serial register in external-clock mode, which keeps
+   only the start bit and the low 7 data bits, reversed (LSDj's author, keyjazz;
+   RetroPlug's lsdjKeyboardMap.ts). So each key code goes in as ONE serial byte:
+   the low 7 bits reversed, MSB first, clocked ~100 us per bit, then a 4 ms gap.
+   A bit is only clocked in while a transfer is armed with the external clock. */
+#define KB_BIT_CYCLES 1u       /* bits of a byte back to back, as RetroPlug does */
+#define KB_GAP_CYCLES 16777u   /* 4 ms between keys, as Arduinoboy does */
+#define KB_GAP 2u
+static uint8_t kb_q[2048];
+static uint32_t kb_head, kb_tail, kb_shift, kb_budget, kb_prev_cyc, kb_unarmed;
+static void kb_push(uint8_t v) { if (kb_tail - kb_head < sizeof kb_q) kb_q[kb_tail++ & (sizeof kb_q - 1u)] = v; }
+void gp_keybd_send(uint8_t code) {
+    uint8_t r = 0;
+    for (unsigned i = 0; i < 7; i++) r = (uint8_t)(r << 1 | ((code >> i) & 1u));   /* low 7 bits, reversed */
+    for (int i = 7; i >= 0; i--) kb_push((r >> i) & 1u);                            /* MSB first */
+    kb_push(KB_GAP);
+}
+uint32_t gp_keybd_pending(void) { return kb_tail - kb_head; }
+static uint32_t kb_frame_cycle(void) {
+    uint32_t ly = gb.hram_io[IO_LY];
+    return ((ly + LCD_VERT_LINES - LCD_HEIGHT) % LCD_VERT_LINES) * LCD_LINE_CYCLES + gb.counter.lcd_count;
+}
+static void kb_clock(void) {
+    uint32_t cyc = kb_frame_cycle();
+    kb_budget += cyc >= kb_prev_cyc ? cyc - kb_prev_cyc : cyc + LCD_FRAME_CYCLES - kb_prev_cyc;
+    kb_prev_cyc = cyc;
+    while (kb_head != kb_tail) {
+        uint8_t v = kb_q[kb_head & (sizeof kb_q - 1u)];
+        uint32_t need = v == KB_GAP ? KB_GAP_CYCLES : KB_BIT_CYCLES;
+        if (kb_budget < need) return;
+        if (v != KB_GAP) {
+            if ((gb.hram_io[IO_SC] & 0x81u) != 0x80u) { kb_budget = need; return; }  /* wait until armed */
+            gb.hram_io[IO_SB] = (uint8_t)(gb.hram_io[IO_SB] << 1 | v);
+            if (++kb_shift == 8u) { kb_shift = 0; gb.hram_io[IO_SC] &= 0x7Fu; gb.hram_io[IO_IF] |= SERIAL_INTR; }
+        }
+        kb_budget -= need; kb_head++;
+    }
+    kb_budget = 0;
+}
 int gp_frame(void) {
     if (!ready || error || paused) return 0;
     /* Backpressure: never advance and discard sound when the consumer stalls. */
@@ -171,7 +211,15 @@ int gp_frame(void) {
     frame_samples=count; rendered_samples=0;
     gb.gb_frame=0;
     unsigned steps=0;
-    while (!gb.gb_frame && !error && steps++<80000) __gb_step_cpu(&gb);
+    kb_prev_cyc = kb_frame_cycle();
+    /* Not in LSDj's keyboard mode (nothing arms the serial port): drop queued keys
+       after ~1 s instead of firing them in a burst later. */
+    if (kb_head != kb_tail && (gb.hram_io[IO_SC] & 0x81u) != 0x80u) { if (++kb_unarmed > 60u) { kb_head = kb_tail; kb_shift = 0; } }
+    else kb_unarmed = 0;
+    while (!gb.gb_frame && !error && steps++<80000) {
+        __gb_step_cpu(&gb);
+        if (kb_head != kb_tail) kb_clock();
+    }
     if (error) { frame_samples=0; return 0; }
     if (!gb.gb_frame) { frame_samples=0; error=GP_TIMEOUT; return 0; }
     if (!(gb.hram_io[0x40]&0x80)) {

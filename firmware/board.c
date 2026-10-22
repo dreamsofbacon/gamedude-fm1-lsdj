@@ -225,7 +225,6 @@ static int lsdj_fl_erase(uint32_t off){uint32_t took;return fl_erase4k(off,&took
 #define LSDJ_CLOCK_HI 0x3FB8u
 #define AUTOSAVE_QUIET_FRAMES 180u   /* 3 s after the last real change */
 #define AUTOSAVE_SILENT_FRAMES 120u  /* 2 s without a note starting */
-#define AUTOSAVE_MIN_TICKS 480000000u /* at least 20 s between autosaves */
 #define AUTOSAVE_RETRY_TICKS 1440000000u /* 60 s after a failed autosave */
 static int save_display_ok;
 static void save_wait(uint32_t ticks){uint32_t t=fm1_ticks();while(fm1_ticks()-t<ticks)fm1_wdt_feed();}
@@ -265,21 +264,60 @@ static void lsdj_save_now(int display_ok){
     fm1_led_key(SAVE_BUTTON,1);
 }
 /* Autosave: after a real change, once things are quiet (no change for 3 s, no
-   note for 2 s, no key held) and at least 20 s after the previous autosave. The
-   SAVE light goes off while it writes. Called once per main-loop pass. */
+   note for 2 s, no key held). The SAVE light goes off for at least 0.5 s so a
+   save is easy to see. Called once per main-loop pass. */
+#define AUTOSAVE_LED_TICKS 12000000u   /* 0.5 s */
 static void lsdj_autosave_poll(uint32_t held){
-    static uint32_t seen_notes,last_note_frame,last_save_ticks,retry_after,have_saved;
+    static uint32_t seen_notes,last_note_frame,last_save_ticks,retry_after,led_off;
     uint32_t f=gp_frame_count(),now=fm1_ticks();
+    if(led_off&&now-last_save_ticks>=AUTOSAVE_LED_TICKS){fm1_led_key(SAVE_BUTTON,1);led_off=0;}
     if(gp_note_count()!=seen_notes){seen_notes=gp_note_count();last_note_frame=f;}
     if(!gp_save_dirty_sig()||held)return;
     if(f-gp_save_last_change()<AUTOSAVE_QUIET_FRAMES||f-last_note_frame<AUTOSAVE_SILENT_FRAMES)return;
-    if(have_saved&&now-last_save_ticks<AUTOSAVE_MIN_TICKS)return;
     if(retry_after&&now-last_save_ticks<retry_after)return;
-    fm1_led_key(SAVE_BUTTON,0);
+    fm1_led_key(SAVE_BUTTON,0);led_off=1;
     int rc=lsdj_store_save();
-    fm1_led_key(SAVE_BUTTON,1);
-    last_save_ticks=fm1_ticks();have_saved=1;
+    last_save_ticks=fm1_ticks();
     retry_after=rc?AUTOSAVE_RETRY_TICKS:0;
+}
+/* Flash speed test (OCT- held + SAVE): erase 5 FREE pool sectors (never a saved
+   entry), one per second while emulation keeps running, and program one page
+   in each; then light one piano key per started millisecond of the slowest
+   erase (all 27 = 27 ms or more) for 4 s. Run it during playback to hear
+   whether an erase (interrupts off) clicks. */
+static uint32_t ftest_left,ftest_next,ftest_max_us,ftest_show_until;
+static void lsdj_flash_test_start(void){
+    if(!recovery_flash_ok||ftest_left)return;
+    ftest_left=5;ftest_next=fm1_ticks();ftest_max_us=0;
+    fm1_led_key(SAVE_BUTTON,0);
+}
+static void lsdj_flash_test_poll(void){
+    uint32_t now=fm1_ticks();
+    if(ftest_show_until&&(int32_t)(now-ftest_show_until)>=0){
+        for(unsigned k=0;k<27;k++)fm1_led_key(14+k,0);
+        ftest_show_until=0;fm1_led_key(SAVE_BUTTON,1);
+    }
+    if(!ftest_left||(int32_t)(now-ftest_next)<0)return;
+    lst_entry_t e[LST_KINDS];uint8_t owner[LST_SECTORS];
+    lst_scan(e,owner);
+    uint32_t pick=LST_SECTORS,skip=5-ftest_left;
+    for(uint32_t s=LST_SECTORS;s-->0;)if(!owner[s]&&skip--==0){pick=s;break;}
+    if(pick<LST_SECTORS){
+        uint32_t took=0;
+        if(!fl_erase4k(lst_sector_off(pick),&took)&&took>ftest_max_us)ftest_max_us=took;
+        static uint8_t zeros[256];
+        uint32_t f=irq_save(),ptook=0;
+        FL_FAR(fl_prog_ram)(lst_sector_off(pick),zeros,256,&ptook);
+        irq_restore(f);
+        uint32_t t2=0;fl_erase4k(lst_sector_off(pick),&t2);  /* leave it erased */
+        if(t2>ftest_max_us)ftest_max_us=t2;
+    }
+    ftest_next=now+24000000u;
+    if(--ftest_left==0){
+        uint32_t ms=(ftest_max_us+999u)/1000u;
+        for(unsigned k=0;k<27;k++)fm1_led_key(14+k,k<ms);
+        ftest_show_until=fm1_ticks()+96000000u;
+    }
 }
 /* At boot, before LSDj's first frame: load the autosave (SAVE light blinks 3
    times); without one, import a v5 save (blinks twice) and autosave it soon. */
@@ -387,9 +425,13 @@ void gb_cstart(const uint32_t *parameters){
         {
             static uint32_t prev_panel;
             uint32_t panel=fm1_in.buttons;
-            if(panel&~prev_panel&(1u<<SAVE_BUTTON))lsdj_save_now(display_ok);
+            if(panel&~prev_panel&(1u<<SAVE_BUTTON)){
+                if(panel&1u)lsdj_flash_test_start();   /* OCT- held: flash speed test */
+                else lsdj_save_now(display_ok);
+            }
             prev_panel=panel;
-            lsdj_autosave_poll(panel|key_lo|key_hi);
+            lsdj_flash_test_poll();
+            if(!ftest_left&&!ftest_show_until)lsdj_autosave_poll(panel|key_lo|key_hi);
         }
 #endif
         if(gp_audio_queued()<2955){

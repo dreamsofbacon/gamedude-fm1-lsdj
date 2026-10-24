@@ -2,7 +2,7 @@
 
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. Per-channel effects and an echo are in development and will be published here.
 
-- **Install:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/). You bring your own `lsdj.gb`: LSDj is not included, and your ROM never leaves your computer.
+- **Install:** through the web installer (repo [lsdj-burrito](https://github.com/dreamsofbacon/lsdj-burrito)); the page is offline for now. You bring your own `lsdj.gb`: LSDj is not included, and your ROM never leaves your computer.
 - **Status:** alpha.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). GameDude's own README follows below.
 

@@ -79,25 +79,46 @@ static void video_stop(void){
 static void video_retire(void){
  video_stop();video_guard.barred=1;video_fallbacks++;
 }
+/* Flash writes (SAVE, settings, the web page's STORE): CPU1 is parked between
+   frames (it then reads only gp_core1, in RAM) instead of stopped. On the FM-1 a
+   stopped CPU1 did not start again (2026-10-25, on the device: the restart never
+   reached gb_core1_start), so each save left the emulator on CPU0, too slow with
+   the effects: crackle until power-off. */
+static void video_hold(void){
+ if(!(core1_emu&&video_online))return;
+ if(!core1_park(2400000u)){video_retire_reason=6;video_retire();}   /* not parked in 100 ms: stopped, as before */
+}
+static void video_release(void){if(core1_emu&&video_online)core1_unpark();}
 static void video_start(uint32_t cold){
  if(cold||video_guard.magic!=0x47445634u){video_guard.magic=0x47445634u;video_guard.barred=video_guard.running=0;}
  if(video_guard.running)video_guard.barred=1;
  if(video_guard.barred)return;
- fm1_core1_stop();video_stage=video_core=0;video_ready=0;video_job.request=video_job.complete=video_job.error=0;
  video_guard.running=1;video_faults=fm1_core1_fault.count;
- for(uint32_t i=0;i<32;i++)*(volatile uint32_t*)(0x1EEF300u+4*i)=0;
- *(volatile uint32_t*)0x1EEF3C0u|=1u; /* CPU1 branch trace for startup diagnostics. */
- *(volatile uint32_t*)0x01C7FFF8u=(uint32_t)(uintptr_t)gb_core1_start;
- uint32_t div=*(volatile uint32_t*)0x10008u;
- *(volatile uint32_t*)0x10008u=div|8u;video_barrier();
- *(volatile uint32_t*)0x1EEE004u|=8u;*(volatile uint32_t*)0x1EEE004u&=~2u;
- uint32_t start=fm1_ticks();
- while(!video_ready&&(uint32_t)(fm1_ticks()-start)<240000u)video_barrier();
- video_barrier();video_online=video_ready!=0&&video_core==1u;video_launch_ready=video_online;
- video_launch_con=*(volatile uint32_t*)0x1EEE004u;
- video_launch_pc=*(volatile uint32_t*)0x1EEF3C4u;
- video_launch_emu=*(volatile uint32_t*)0x1EEF2D4u;video_launch_dbg=FM1_DBG_MSG;
- *(volatile uint32_t*)0x10008u=div;
+ /* Up to three tries, CPU1 held in reset longer each time (0, 1, 20 ms): a start
+    after a warm reset (an install) failed on the device. video_launch_ready = the
+    try that worked (1..3), 0 none: read over USB (diagnostics 7D 'G' 'D'). */
+ static const uint32_t hold_ticks[3]={0u,24000u,480000u};
+ uint32_t tries=0;video_online=0;
+ while(!video_online&&tries<3u){
+  fm1_core1_stop();
+  {uint32_t t=fm1_ticks();while((uint32_t)(fm1_ticks()-t)<hold_ticks[tries])video_barrier();}
+  tries++;
+  video_stage=video_core=0;video_ready=0;video_job.request=video_job.complete=video_job.error=0;
+  for(uint32_t i=0;i<32;i++)*(volatile uint32_t*)(0x1EEF300u+4*i)=0;
+  *(volatile uint32_t*)0x1EEF3C0u|=1u; /* CPU1 branch trace for startup diagnostics. */
+  *(volatile uint32_t*)0x01C7FFF8u=(uint32_t)(uintptr_t)gb_core1_start;
+  uint32_t div=*(volatile uint32_t*)0x10008u;
+  *(volatile uint32_t*)0x10008u=div|8u;video_barrier();
+  *(volatile uint32_t*)0x1EEE004u|=8u;*(volatile uint32_t*)0x1EEE004u&=~2u;
+  uint32_t start=fm1_ticks();
+  while(!video_ready&&(uint32_t)(fm1_ticks()-start)<240000u)video_barrier();
+  video_barrier();video_online=video_ready!=0&&video_core==1u;
+  video_launch_con=*(volatile uint32_t*)0x1EEE004u;
+  video_launch_pc=*(volatile uint32_t*)0x1EEF3C4u;
+  video_launch_emu=*(volatile uint32_t*)0x1EEF2D4u;video_launch_dbg=FM1_DBG_MSG;
+  *(volatile uint32_t*)0x10008u=div;
+ }
+ video_launch_ready=video_online?tries:0u;
  if(!video_online){video_retire_reason=1;video_retire();}
 }
 static void video_submit(const uint16_t *pixels){

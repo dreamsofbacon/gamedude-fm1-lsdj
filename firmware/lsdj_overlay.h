@@ -245,6 +245,10 @@ typedef struct {
     uint8_t level[4];        /* 0..127 */
     int8_t hot;              /* column drawn in amber (the knob just turned), -1 none */
     int8_t chan;             /* LSDj channel column framed (the one the effects act on), -1 none */
+    /* a knob with 2 or 3 choices is drawn as its choices, not a bar (lsdj_nat_bars): how many
+       (0: a bar), the one set, and their 2-character names, lowest first */
+    uint8_t nchoice[4], pick[4];
+    char choice[4][3][3];
     uint32_t until_ms;
 } lsdj_ov_bars_t;
 

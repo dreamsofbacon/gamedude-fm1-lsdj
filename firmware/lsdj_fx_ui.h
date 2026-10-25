@@ -253,6 +253,28 @@ static void lsdj_fx_page_turn(lsdj_fx_ui_t *u, int steps) {
     u->page = (uint8_t)(p < 0 ? p + (int)LSDJ_FX_PAGES : p);
 }
 
+/* Knob effects with 2 or 3 choices: shown as their choices, not as a bar. */
+static const char *lsdj_fxk_choice_short(unsigned k, unsigned i) {
+    static const char *const dest[3] = {"CT", "VL", "PN"};
+    switch (k) {
+    case FXK_FXON: case FXK_FREEZE: return i ? "ON" : "OF";
+    case FXK_SYNC: return i ? "TP" : "FR";
+    case FXK_MODE: return i ? "PP" : "MO";
+    case FXK_LFO_DEST: return dest[i % 3u];
+    }
+    return "";
+}
+static void lsdj_fx_bar_choices(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uint8_t nchoice[4], uint8_t pick[4], char choice[4][3][3]) {
+    unsigned pg = u->page % LSDJ_FX_PAGES;
+    for (unsigned k = 0; k < 4; k++) {
+        unsigned e = lsdj_fx_page_knob[pg][k], n = lsdj_fxk_choices(e);
+        nchoice[k] = 0; pick[k] = 0;
+        if (n < 2u || n > 3u) continue;
+        nchoice[k] = (uint8_t)n; pick[k] = (uint8_t)lsdj_fxk_get(fx, u, e);
+        for (unsigned i = 0; i < n; i++) { const char *s = lsdj_fxk_choice_short(e, i); choice[k][i][0] = s[0]; choice[k][i][1] = s[1]; choice[k][i][2] = 0; }
+    }
+}
+
 /* What the bars show: title "FILTER PU1 1/4", per knob its level, value,
    name and "K1".."K4"; the bottom line: the effect of knob `hot` and its value
    ("CUTOFF 64"), or with hot < 0 how pages turn. Fields as lsdj_ov_bars_t. */

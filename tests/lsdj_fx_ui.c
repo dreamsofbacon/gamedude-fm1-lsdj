@@ -199,6 +199,21 @@ int main(int argc, char **argv) {
             fclose(f);
         }
     }
-    puts("PASS: effects controls: pages, SELECT turns pages, knobs per page, choices, bars text fits, shortcuts, save words");
+    /* 2 or 3 choices: drawn as the choices, not a bar; everything else (and 4+ choices) a bar */
+    {   uint8_t nc[4], pick[4]; char ch[4][3][3];
+        lsdj_fx_t f; lsdj_fx_ui_t fu; lsdj_fx_init(&f, echo); lsdj_fx_ui_init(&fu); fu.cursor_ch = 1;
+        f.p.q[1][FXQ_LFO_DEST] = 2; f.p.m[FXM_MODE] = 1; f.p.fx_off = 2; lsdj_fx_update(&f);
+        fu.page = 2; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);   /* LFO: rate, depth, shape (5) bars; LFO TO 3 */
+        assert(nc[0] == 0 && nc[1] == 0 && nc[2] == 0 && nc[3] == 3 && pick[3] == 2 && !strcmp(ch[3][0], "CT") && !strcmp(ch[3][2], "PN"));
+        fu.page = 3; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);   /* LO-FI: FX ON, off on PU2 */
+        assert(nc[3] == 2 && pick[3] == 0 && !strcmp(ch[3][1], "ON"));
+        fu.page = 5; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);   /* ECHO MORE: wobble bar; sync, mode, freeze */
+        assert(nc[0] == 0 && nc[1] == 2 && nc[2] == 2 && pick[2] == 1 && !strcmp(ch[2][1], "PP") && nc[3] == 2);
+        fu.page = 0; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);   /* FILTER: the type has 6 choices: a bar */
+        assert(!nc[0] && !nc[1] && !nc[2] && !nc[3]);
+        for (unsigned p = 0; p < LSDJ_FX_PAGES; p++) { fu.page = (uint8_t)p; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);
+            for (int k = 0; k < 4; k++) for (unsigned i = 0; i < nc[k]; i++) fits(ch[k][i], 2); }
+    }
+    puts("PASS: effects controls: pages, SELECT turns pages, knobs per page, choices, bars text fits, shortcuts, save words, 2-3 choices as choices");
     return 0;
 }

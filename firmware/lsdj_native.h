@@ -79,13 +79,17 @@ static void lsdj_nat_tint(const lsdj_nat_t *n, unsigned x0, unsigned y0, unsigne
    It covers the song area (columns 0..14) down to row 15 and is laid out like a
    mixer, knob k in channel k's 2-wide data column (column 3+3k): row 0 the
    title, row 1 the turned knob ("K1 DRIVE 08") or the hint as a value field
-   across the panel, rows 2..14 a bar of song-cell blocks filled from the bottom
-   (filled: LSDj's value-field block, empty: "--" as an empty song cell), row 15
-   its value. Rows 16..17 are the knob names (lsdj_nat_names), drawn with the
+   across the panel, rows 2..13 a bar of song-cell blocks filled from the bottom
+   (filled: LSDj's value-field block, empty: "--" as an empty song cell) in
+   LSDj's own groups of four rows (song rows 00-03, 04-07, 08-0B), a gap between
+   them; row 15 its value. A knob with 2 or 3 choices has no bar: its choices,
+   one per group of four rows, lowest at the bottom, the one set as a filled
+   group with its name in it. Rows 16..17 are the knob names (lsdj_nat_names), drawn with the
    panel (board.c native_draw). The effect channel's column is
    tinted. LSDj's right panel stays. */
 #define LSDJ_NAT_BAR_TOP 2u
-#define LSDJ_NAT_BAR_CELLS 13u
+#define LSDJ_NAT_QUAD 4u        /* LSDj's rows come in groups of four */
+#define LSDJ_NAT_BAR_CELLS 12u  /* three groups: rows 2..13 = song rows 00..0B */
 #define LSDJ_NAT_PANEL 15u   /* columns 0..14: LSDj's right panel and screen map (15..19) stay */
 #define LSDJ_NAT_VALUE_ROW 15u
 #define LSDJ_NAT_NAME_ROW 16u   /* rows 16..17 */
@@ -98,12 +102,34 @@ static void lsdj_nat_bars(const lsdj_nat_t *n, const lsdj_ov_bars_t *b, uint16_t
         if (!b->label[k][0]) continue;
         unsigned c = 3u + 3u * k, hot = (int)k == b->hot;
         lsdj_nat_text(n, c, LSDJ_NAT_VALUE_ROW, b->value[k], 2, (int)hot);
+        if (b->nchoice[k] >= 2u && b->nchoice[k] <= 3u) {   /* the choices, one per group */
+            for (unsigned i = 0; i < b->nchoice[k]; i++) {
+                unsigned top = LSDJ_NAT_BAR_TOP + (LSDJ_NAT_BAR_CELLS / LSDJ_NAT_QUAD - 1u - i) * LSDJ_NAT_QUAD;
+                if (i == b->pick[k]) {
+                    for (unsigned r = 0; r < LSDJ_NAT_QUAD; r++) lsdj_nat_text(n, c, top + r, "  ", 2, 1);
+                    lsdj_nat_text(n, c, top + 1u, b->choice[k][i], 2, 1);
+                } else lsdj_nat_text(n, c, top + 1u, b->choice[k][i], 2, 0);
+            }
+            continue;
+        }
         unsigned lv = b->level[k] > 127u ? 127u : b->level[k];
         unsigned fill = (lv * LSDJ_NAT_BAR_CELLS + 63u) / 127u;
         if (lv && !fill) fill = 1u;
         for (unsigned i = 0; i < LSDJ_NAT_BAR_CELLS; i++) {
             unsigned row = LSDJ_NAT_BAR_TOP + LSDJ_NAT_BAR_CELLS - 1u - i;
             lsdj_nat_text(n, c, row, i < fill ? "  " : "--", 2, i < fill);
+        }
+    }
+    {   /* the groups: a 2-pixel gap in the background colour between them, across the columns */
+        uint16_t bg = lsdj_nat_col(n, 0);
+        for (unsigned g = 1; g < LSDJ_NAT_BAR_CELLS / LSDJ_NAT_QUAD; g++) {
+            unsigned y = (LSDJ_NAT_BAR_TOP + g * LSDJ_NAT_QUAD) * 8u;
+            for (unsigned k = 0; k < 4u; k++) {
+                if (!b->label[k][0]) continue;
+                unsigned x0 = (3u + 3u * k) * 8u;
+                for (unsigned yy = y - 1u; yy <= y; yy++)
+                    for (unsigned x = x0; x < x0 + 16u; x++) n->px[yy * LSDJ_NAT_W + x] = bg;
+            }
         }
     }
     if (b->chan >= 0 && b->chan < 4)

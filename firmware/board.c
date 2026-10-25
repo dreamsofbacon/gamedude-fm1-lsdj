@@ -411,6 +411,7 @@ static void midi_in(uint32_t pkt,uint32_t at_ms,uint32_t src){
 static lsdj_ov_bars_t bars;
 static void fx_bars_fill(void){
     lsdj_fx_bars(&fx,&fxu,bars.hot,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
+    lsdj_fx_bar_choices(&fx,&fxu,bars.nchoice,bars.pick,bars.choice);   /* 2 or 3 choices: no bar */
     { unsigned t=lsdj_fx_eff(&fxu);bars.chan=(int8_t)(t<4u?(int)t:-1); }   /* frame the channel the effects act on */
 }
 static void fx_bars_show(int hot){
@@ -509,7 +510,7 @@ static void play_save_done(int ok){
     play_save=0;fm1_led_key(SAVE_BUTTON,1);
     if(ok)gp_save_clean();
     if(settings_pending){   /* settings changed while the save ran */
-        settings_pending=0;video_stop();(void)settings_store();video_start(0);
+        settings_pending=0;video_hold();(void)settings_store();video_release();
     }
     lsdj_ov_say(&ov,ok?LSDJ_MSG_SAVED:LSDJ_MSG_SAVE_FAILED,fm1_ms);
     if(!ok)save_blink(5,1200000u);
@@ -546,11 +547,11 @@ static void lsdj_save_button(void){
     }
     if(!recovery_flash_ok){lsdj_ov_say(&ov,LSDJ_MSG_SAVE_FAILED,fm1_ms);save_blink(5,1200000u);return;}
     fm1_led_key(SAVE_BUTTON,0);
-    video_stop();
+    video_hold();   /* CPU1 parked, not stopped (multicore_video.h) */
     ov_now(LSDJ_MSG_SAVING);
     int rc=ftl_save_now(&ftl,gp_save_data());
     if(rc>=0){int fr=fx_store();if(fr<0)rc=-1;else if(rc==0&&fr>0)rc=1;}   /* and the effects */
-    video_start(0);
+    video_release();
     if(rc>=0)gp_save_clean();
     lsdj_ov_say(&ov,rc>0?LSDJ_MSG_SAVED:rc==0?LSDJ_MSG_NO_CHANGES:LSDJ_MSG_SAVE_FAILED,fm1_ms);
     fm1_led_key(SAVE_BUTTON,1);
@@ -717,7 +718,7 @@ static uint32_t lk_size(void){return gp_save_size();}
 static void lk_pause(int on){gp_pause((uint32_t)on);}
 static int lk_store(void){
     if(!recovery_flash_ok||play_save)return -1;
-    video_stop();int rc=ftl_save_now(&ftl,gp_save_data());video_start(0);
+    video_hold();int rc=ftl_save_now(&ftl,gp_save_data());video_release();
     if(rc>=0)gp_save_clean();
     return rc<0?-1:0;
 }
@@ -758,11 +759,11 @@ static void theme_load(void){
 }
 static int lk_store_config(void){
     if(!recovery_flash_ok||play_save)return -1;
-    video_stop();
+    video_hold();
     int rc=settings_store();
     if(!rc&&fx_store()<0)rc=-1;
     if(!rc)rc=theme_store();
-    video_start(0);
+    video_release();
     return rc?-1:0;
 }
 static void lk_live(lsdj_link_live_t *l){
@@ -835,11 +836,11 @@ static void ble_mac(uint8_t mac[6]){
    meanwhile (as SAVE does): the radio starting while CPU1 runs from flash is untried. */
 static void ble_start_wait(void){
     uint8_t mac[6];ble_mac(mac);
-    int was=video_online;if(was)video_stop();
+    video_hold();
     lsdj_ble_start(mac);
     uint32_t t0=fm1_ms;
     while(lsdj_ble_state()==LSDJ_BLE_STARTING&&fm1_ms-t0<3000u){fm1_wdt_feed();lsdj_ble_service();}
-    if(was)video_start(0);
+    video_release();
 }
 static uint32_t ble_shown=LSDJ_BLE_OFF;
 static uint8_t ble_off_told;
@@ -877,11 +878,13 @@ static void fm1_input_frame(void){
         unsigned b=lsdj_tempo_turn(&tempo,(int)enc[2],(int)enc[3]);enc[2]=enc[3]=enc[4]=enc[5]=0;
         if(b)tempo_apply(b);
         lsdj_tempo_bars(&tempo,sync_midi,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
+        for(unsigned k=0;k<4u;k++)bars.nchoice[k]=0;
         bars.hot=-1;bars.chan=-1;lsdj_ov_bars_keep(&bars,fm1_ms);
     }
     if(cue.held){   /* ARP held: K1 / K2 choose the song row to cue, not effects */
         lsdj_cue_turn(&cue,(int)enc[2],(int)enc[3]);enc[2]=enc[3]=enc[4]=enc[5]=0;
         lsdj_cue_bars(&cue,gp_save_data()+songtab_off,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
+        for(unsigned k=0;k<4u;k++)bars.nchoice[k]=0;
         bars.hot=-1;bars.chan=-1;lsdj_ov_bars_keep(&bars,fm1_ms);
     }
     {   /* KNOB 1-4 (encoders 2-5): the page's four effects */
@@ -1099,7 +1102,7 @@ void gb_cstart(const uint32_t *parameters){
                     if(menu.changed){   /* keep them: a 16-byte record, the emulator parked meanwhile */
                         int rc=-8;
                         if(play_save){settings_pending=1;rc=0;}   /* written when the save is done */
-                        else if(recovery_flash_ok){video_stop();rc=settings_store();video_start(0);}
+                        else if(recovery_flash_ok){video_hold();rc=settings_store();video_release();}
                         lsdj_ov_say(&ov,rc?LSDJ_MSG_SETTINGS_FAILED:LSDJ_MSG_SETTINGS_SAVED,fm1_ms);
                     }
                 }
@@ -1110,6 +1113,13 @@ void gb_cstart(const uint32_t *parameters){
                 uint32_t u=audio_underruns;cpu.underrun_count+=u-underruns_seen;underruns_seen=u;
             }
             cpu.core1=(uint8_t)(core1_emu&&video_online);cpu.reason=(uint8_t)video_retire_reason;
+            {   /* the emulator fell back to CPU0 (CPU1 did not start, or stopped): too slow with the
+                   effects, the sound crackles. Say so once each time, and how to get CPU1 back. */
+                static uint32_t told=0;
+                if(!(core1_emu&&video_online)&&video_fallbacks!=told&&fm1_ms>6000u){
+                    told=video_fallbacks;lsdj_ov_show(&ov,"CPU1 STOPPED: SOUND","MAY CRACKLE. OFF+ON",fm1_ms);
+                }
+            }
             if(lsdj_cpu_poll(&cpu,fm1_ticks())&&settings.meter&&!menu.open){
                 static char l1[20],l2[20];
                 lsdj_cpu_lines(&cpu,l1,l2);lsdj_ov_show(&ov,l1,l2,fm1_ms);

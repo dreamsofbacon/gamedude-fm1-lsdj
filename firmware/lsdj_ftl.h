@@ -33,7 +33,13 @@
 #define FTL_ENT_PER_MAP ((0x1000u - 16u) / 16u)          /* 255 */
 #define FTL_NONE      0xFFu
 enum { FTL_FREE = 0, FTL_DIRTY = 1, FTL_LIVE = 2, FTL_MAP = 3, FTL_PENDING = 4 };
-enum { FTL_E_DATA = 0x5A, FTL_E_COMMIT = 0xC3 };
+enum { FTL_E_DATA = 0x5A, FTL_E_COMMIT = 0xC3,
+       FTL_E_SETTINGS = 0x5E };   /* a 32-bit record in dcrc; record number in
+                                     `block` (0xFF = record 0, the settings word;
+                                     1.. = effects); the newest of each counts.
+                                     Older firmware skips this type. */
+#define FTL_RECS 23u   /* records 0..22: 0 settings, 1..11 effects, 12..15 the custom theme, 16 MIDI options,
+                          17..22 the effects' words 11..16 (alpha 66) */
 
 typedef struct { uint32_t magic, gen, rsv, hcrc; } ftl_hdr_t;
 typedef struct { uint8_t type, block, sector, rsv; uint32_t seq, dcrc, ecrc; } ftl_ent_t;
@@ -50,6 +56,8 @@ typedef struct {
     int cur_block; uint32_t cur_sector, cur_page;
     uint32_t retry;                  /* blocks of a failed save, retried next time */
     uint32_t saves, failures;
+    uint32_t settings; uint8_t has_settings;   /* record 0: the settings word */
+    uint32_t rec[FTL_RECS]; uint32_t rec_has;  /* records 1..: bit n = record n kept */
     uint8_t buf[4096];               /* the block being written (a snapshot) */
 } ftl_t;
 
@@ -102,12 +110,20 @@ static int ftl_boot(ftl_t *f, uint8_t *ram) {
             if ((int32_t)(e.seq - f->seq) > 0) f->seq = e.seq;
             if (e.type == FTL_E_DATA && e.block < FTL_BLOCKS && e.sector < FTL_N && pn < FTL_BLOCKS) {
                 pb[pn] = e.block; ps[pn] = e.sector; pc[pn] = e.dcrc; pn++;
+            } else if (e.type == FTL_E_SETTINGS) {
+                unsigned n = e.block == 0xFF ? 0u : e.block;   /* not part of a save */
+                if (n == 0) { f->settings = e.dcrc; f->has_settings = 1; }
+                else if (n < FTL_RECS) { f->rec[n] = e.dcrc; f->rec_has |= 1u << n; }
             } else if (e.type == FTL_E_COMMIT) {
                 for (uint32_t k = 0; k < pn; k++) { f->map_of[pb[k]] = ps[k]; f->crc_of[pb[k]] = pc[k]; }
                 pn = 0;
             }
         }
         f->map_next = last_used;
+        /* A save cut off after its data entries but before its commit left them
+           pending. Appending the next save's commit to this map would adopt them
+           too, so the next save starts a fresh map (compaction) instead. */
+        if (pn) f->map_next = FTL_ENT_PER_MAP;
     }
     /* Sector states: map, live data, then erased-or-not for the rest. */
     for (uint32_t s = 0; s < FTL_N; s++) f->state[s] = FTL_DIRTY;
@@ -161,6 +177,9 @@ static int ftl_compact(ftl_t *f) {
         if (ftl_put_entry(f, &e)) goto fail;
     }
     { ftl_ent_t c = ftl_entry(f, FTL_E_COMMIT, 0xFF, 0xFF, 0); if (ftl_put_entry(f, &c)) goto fail; }
+    if (f->has_settings) { ftl_ent_t st = ftl_entry(f, FTL_E_SETTINGS, 0xFF, 0xFF, f->settings); if (ftl_put_entry(f, &st)) goto fail; }
+    for (uint32_t n = 1; n < FTL_RECS; n++)
+        if (f->rec_has & (1u << n)) { ftl_ent_t st = ftl_entry(f, FTL_E_SETTINGS, (uint8_t)n, 0xFF, f->rec[n]); if (ftl_put_entry(f, &st)) goto fail; }
     {
         static ftl_hdr_t h; h.magic = FTL_MAGIC; h.gen = old_gen + 1; h.rsv = 0xFFFFFFFFu; h.hcrc = ftl_hcrc(&h);
         if (LSDJ_FL_WRITE(ftl_off((uint32_t)s), (const uint8_t *)&h, sizeof h)) goto fail;
@@ -278,3 +297,70 @@ static int ftl_format(ftl_t *f, const uint8_t *ram, const uint8_t keep[FTL_N]) {
         if (keep && keep[s]) { if (LSDJ_FL_ERASE(ftl_off(s))) return -1; f->state[s] = FTL_FREE; }
     return 0;
 }
+
+/* SAVE button: the whole save in one go, with emulation paused (so erases are
+   fine). Writes every block whose contents differ from its committed copy, then
+   erases the sectors that became stale so the next save needs no erases first.
+   1 = committed, 0 = nothing had changed, < 0 = failed (the previous save stays). */
+/* Blocks of ram that differ from their committed copy (bit b = block b). */
+static uint32_t ftl_changed(const ftl_t *f, const uint8_t *ram) {
+    uint32_t mask = 0;
+    for (uint32_t b = 0; b < FTL_BLOCKS; b++)
+        if (f->map_of[b] == FTL_NONE || ftl_crc32(0, ram + b * 4096u, 4096u) != f->crc_of[b]) mask |= 1u << b;
+    return mask;
+}
+static int ftl_save_now(ftl_t *f, const uint8_t *ram) {
+    while (ftl_busy(f)) if (ftl_step(f, ram, 1) < 0) return -1;   /* not expected: finish it */
+    uint32_t mask = ftl_changed(f, ram);
+    if (!mask && !f->retry) return 0;
+    int rc;
+    while ((rc = ftl_begin(f, mask)) == -2) {            /* too few erased sectors: erase one */
+        mask = 0;                                         /* ftl_begin kept it in f->retry */
+        uint32_t before = ftl_count(f, FTL_FREE);
+        if (ftl_step(f, ram, 1) < 0 || ftl_count(f, FTL_FREE) == before) return -2;
+    }
+    if (rc) return -1;
+    int committed = 0;
+    while (ftl_busy(f)) {
+        int r = ftl_step(f, ram, 1);
+        if (r < 0) return -1;
+        if (r == 1) committed = 1;
+    }
+    while (ftl_count(f, FTL_DIRTY)) {                     /* tidy up while still paused */
+        uint32_t before = ftl_count(f, FTL_DIRTY);
+        if (ftl_step(f, ram, 1) < 0 || ftl_count(f, FTL_DIRTY) == before) break;
+    }
+    return committed ? 1 : -1;
+}
+
+/* Keep record n (0 = the settings word, 1.. = effects): one 16-byte map record;
+   a fresh map first if this one is full. Programs only, unless no erased sector
+   is left for that fresh map. The caller has stopped everything that reads the
+   flash. 0 = kept; the previous value stays if it fails. */
+static int ftl_put_record(ftl_t *f, unsigned n, uint32_t value) {
+    if (ftl_busy(f) || n >= FTL_RECS) return -1;
+    uint32_t *slot = n ? &f->rec[n] : &f->settings;
+    int had = n ? (int)((f->rec_has >> n) & 1u) : f->has_settings;
+    if (had && *slot == value) return 0;
+    uint32_t keep = *slot;
+    *slot = value;                                     /* a fresh map carries the new value */
+    if (n) f->rec_has |= 1u << n; else f->has_settings = 1;
+    int rc;
+    if (f->state[f->map_sector] != FTL_MAP || f->map_next + 1u > FTL_ENT_PER_MAP) {
+        if (!ftl_count(f, FTL_FREE)) {                 /* make room: erase one stale sector */
+            for (uint32_t s = 0; s < FTL_N; s++)
+                if (f->state[s] == FTL_DIRTY) { if (LSDJ_FL_ERASE(ftl_off(s)) == 0) f->state[s] = FTL_FREE; break; }
+        }
+        rc = ftl_compact(f);
+    } else {
+        ftl_ent_t e = ftl_entry(f, FTL_E_SETTINGS, n ? (uint8_t)n : 0xFF, 0xFF, value);
+        rc = ftl_put_entry(f, &e);
+    }
+    if (rc) {
+        *slot = keep;
+        if (!had) { if (n) f->rec_has &= ~(1u << n); else f->has_settings = 0; }
+        return -1;
+    }
+    return 0;
+}
+static int ftl_put_settings(ftl_t *f, uint32_t value) { return ftl_put_record(f, 0, value); }

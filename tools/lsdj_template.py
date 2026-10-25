@@ -1,13 +1,12 @@
 """Build the public LSDj firmware template: GameDude for FM-1 with an EMPTY ROM slot.
 
-The web installer (web/lsdj.html) writes each user's own LSDj into the slot in
-their browser, so this template contains no LSDj and can be shared.
-Run it for each alpha: the template has that alpha's identity (FELUCCA_ID,
-FM-1_9NN), so the web installer, like M-UPGRADE, sees it as newer.
+The sibling Burrito website writes each user's own LSDj into the slot locally.
+The generic experimental template has identity FM-1_967, independently of the
+normal alpha 66 build. This template contains no LSDj ROM.
 
 Run in WSL from the GameDude root, with the FM-1 toolchain and AC79 SDK:
   python3 tools/lsdj_template.py --toolchain /root/.jieli/toolchain --sdk /root/ac79-sdk
-writes web/lsdj/fm1-lsdj-template.fwsc and web/lsdj/template.json.
+writes build/lsdj-template/fm1-lsdj-template.fwsc and template.json.
 Packaging follows tools/package_fm1.py (same checks), without its author-private
 restore-package round trip. Never accesses a device."""
 import argparse,hashlib,json,re,subprocess,sys
@@ -21,6 +20,7 @@ HDR,BANK=256,16384
 def main():
     ap=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--toolchain',required=True);ap.add_argument('--sdk',required=True,type=Path)
+    ap.add_argument('--output-dir',type=Path,default=ROOT/'build/lsdj-template')
     a=ap.parse_args()
     for rel,digest in SDK_HASHES.items():
         assert sha((a.sdk/'cpu/wl82/tools'/rel).read_bytes())==digest,rel+' SDK revision mismatch'
@@ -32,10 +32,8 @@ def main():
     # nothing after the header the compiler drops the code that reads past it.)
     code=build(HDR+BANK)['app_bytes']-BANK
     banks=(APP_MAX-code-64)//BANK
-    while True:
-        assert banks>=13,'Not even LSDj\'s code banks fit'
-        try:m=build(HDR+banks*BANK);break
-        except subprocess.CalledProcessError:banks-=1   # alignment pushed it over: one bank less
+    assert banks>=13,'Not even LSDj\'s code banks fit'
+    m=build(HDR+banks*BANK)
     print(f'LSDj slot: {banks} banks ({HDR+banks*BANK} bytes); app {m["app_bytes"]} of {APP_MAX} bytes')
 
     # Package (as tools/package_fm1.py).
@@ -52,7 +50,7 @@ def main():
     loader=wrap((out/'loader.bin').read_bytes());assert len(loader)<=0x4f00
     app=(out/'gb-fm1-NOT-FOR-INSTALL.bin').read_bytes()
     assert m['sha256']==sha(app) and m['usb_updater'] and m.get('lsdj_slot')==1
-    product=re.search(r'#define FELUCCA_ID "(FM-1_\d+)"',(ROOT/'firmware/fm1_recovery.h').read_text())[1]
+    product=m['product']
     assert product.encode() in app,'Template identity mismatch'
     offset,capacity=m['cartridge_offset'],m['cartridge_capacity']
     assert app[offset:offset+capacity]==b'\xff'*capacity,'The ROM slot must be empty'
@@ -63,14 +61,15 @@ def main():
     assert area[0x120:0x120+len(app)]==app
     ota=out/'ota-test'
     subprocess.run(['gcc','-O1','-UNDEBUG','-w','vendor/felucca/tests/ota_test.c','-o',ota],cwd=ROOT,check=True)
-    web=ROOT/'web/lsdj';web.mkdir(parents=True,exist_ok=True)
+    web=a.output_dir;web.mkdir(parents=True,exist_ok=True)
     (web/'fm1-lsdj-template.fwsc').write_bytes(raw)
     print(subprocess.check_output([ota,web/'fm1-lsdj-template.fwsc'],cwd=ROOT,text=True).strip())
     meta={'product':product,'package':'fm1-lsdj-template.fwsc','sha256':sha(raw),
           'cartridge_offset':offset,'cartridge_capacity':capacity,'lsdj_slot':1,
           'usb_updater':True,'usb_protocol':'fm1-ota-v1',
           'protected_app_sha256':hashlib.sha256(app[:offset]+app[offset+capacity:]+b'\xff'*(APP_MAX-len(app))).hexdigest(),
-          'loader_sha256':sha(loader),'app_bytes':len(app),
+          'loader_sha256':sha(loader),'app_bytes':len(app),'experimental':True,
+          'hardware_validated':False,'generic_rom':True,
           'notice':'Empty LSDj slot. Each user\'s own LSDj is inserted locally in the browser.'}
     (web/'template.json').write_text(json.dumps(meta,indent=2)+'\n')
     print(json.dumps(meta,indent=2))

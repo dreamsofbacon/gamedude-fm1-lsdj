@@ -41,6 +41,10 @@ int main(void) {
     build(); win[20 + 64] = 0; reseal();       assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);  /* beyond logical */
     build(); put16(win + 12, 5); reseal();     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);  /* doesn't fit */
     build(); put16(win + 10, 200); reseal();   assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
+    build(); put16(win + 10, 63); reseal();    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
+    build(); put16(win + 14, 4); reseal();     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
+    build(); win[20 + 8] = 1; reseal();       assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
+    build(); win[20 + 8] = 0xff; reseal();    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
     build(); win[LSDJ_SLOT_HDR + 40000] ^= 1;  assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_DATA);
     assert(lsdj_slot_parse(win, 100, &s) == LSDJ_SLOT_BAD_LAYOUT);
     puts("PASS: LSDj slot: empty, valid, bad magic/CRC/version, bad map, oversize, corrupt data");

@@ -1,16 +1,48 @@
 # Dreamy_bacon's LSDJ Burrito
 
-LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. Per-channel effects and an echo are in development and will be published here.
+LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
-- **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/) (installing from it is switched off for now; it checks your ROM). You bring your own `lsdj.gb`: LSDj is not included, and your ROM never leaves your computer.
-- **Status:** alpha.
-- **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). GameDude's own README follows below.
+- **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): songs, effects, settings and colours over USB (or Bluetooth), and installing an LSDJ Burrito `.fwsc` with safeguards. You bring your own `lsdj.gb`: LSDj is not included, and your ROM never leaves your computer.
+- **Status:** alpha (alpha 66). The ROM-free template for installing with your own LSDj from the page (below) is experimental and not yet tested on hardware.
+- **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 
 ---
 
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: experimental webpage template
+
+This fork also builds the ROM-free FM-1_967 LSDj template for the sibling Burrito
+website. This is separate from the upstream GameDude library workflow below.
+Normal alpha 66 ROM builds remain FM-1_966.
+
+From this repository in WSL:
+
+```sh
+python3 tools/lsdj_template.py --toolchain /root/.jieli/toolchain --sdk /root/ac79-sdk
+```
+
+Output is `build/lsdj-template/fm1-lsdj-template.fwsc` and `template.json`;
+`--output-dir` overrides the destination. The build also replaces intermediate
+`build/fm1` files. SDK hashes, image bounds, erased slot, package round trip and
+simulated OTA are checked. Only the ROM-free package and matching metadata may
+be copied to the sibling site's `lsdj/` directory. Never publish ROM-bearing builds.
+
+The current template has 31 stored 16 KiB banks plus a 256-byte header. The browser
+requires explicit kit selection if the ROM exceeds this budget and preserves
+logical bank numbers. Unrecognized program/data banks cannot be discarded.
+The dynamic slot parser validates header/data CRCs and a complete sequential bank
+map before emulation. Generic slot builds disable the hard-coded 9.3.9 memory
+profile: tempo shortcuts, MIDI clock integration, cues and cursor-following FX
+are unavailable. Back up saves before switching versions.
+
+This template is **experimental, not hardware-validated**. Packaging and simulated
+OTA success do not establish boot/audio correctness or recoverability after
+interrupted flashing. `tests/lsdj_slot.c` tests slot parsing; `tests/lsdj_rom.c`
+accepts a private browser-generated slot for a 600-frame host emulator smoke test.
+The sibling site's `tests/loader.mjs` tests browser packing and optional local ROMs.
 
 **Now with Bluetooth and Multi-game storage.**
 

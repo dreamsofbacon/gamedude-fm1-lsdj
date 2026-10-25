@@ -20,7 +20,9 @@ MEMORY
 }
 SECTIONS
 {
-    .text : { KEEP(*(.text.crt0)) *(.text*) *(.rodata*) . = ALIGN(4); _etext = .; } > XIP
+    /* memset/memcpy right after crt0: within the 23-bit jump range of code in RAM
+       (.ram_text) as well as of code in flash; the compiler calls them implicitly. */
+    .text : { KEEP(*(.text.crt0)) *(.text.memset) *(.text.memcpy) *(.text.memcmp) *(.text*) *(.rodata*) . = ALIGN(4); _etext = .; } > XIP
     .ram_text : { _rt_start = .; KEEP(*(.ram_text*)) . = ALIGN(4); _rt_end = .; } > RAMTEXT AT > XIP
     _rt_load = LOADADDR(.ram_text);
     .dsp_text : { _dsp_start = .; *(.dsp_text*) . = ALIGN(4); _dsp_end = .; } > RAMTEXT AT > XIP

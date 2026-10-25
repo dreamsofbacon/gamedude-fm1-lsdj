@@ -3,13 +3,12 @@
    same code runs in the firmware and in the host test (tests/lsdj_input.c).
 
    Knobs, always active, one Game Boy tap per detent:
-     PRESETS    left  / right      ALGORITHM  up     / down
-     KNOB 3     select/ start      KNOB 4     B      / A
-     (counter-clockwise / clockwise)
+     PRESETS    up / down          ALGORITHM  left / right
+     (counter-clockwise / clockwise). KNOB 3 and KNOB 4 are kept free.
    Piano keys, toggled with HOME:
      button mode: GameDude mapping (gp_input_keys); held keys do all combos
      note mode:   keys go to LSDJ_KEYBD_NOTE (LSDj SYNC=KEYBD), OCT-/OCT+ shift
-   PLAY = Select and REC = Start in both modes. */
+   PLAY = Start and REC = Select in both modes. */
 #pragma once
 #include <stdint.h>
 #include "gb_port.h"
@@ -24,11 +23,12 @@
 #ifndef LSDJ_ENC_ALGORITHM
 #define LSDJ_ENC_ALGORITHM 1   /* ENC_ALGORITHM */
 #endif
+/* KNOB 3 (ENC_KNOB3 = 4) and KNOB 4 (ENC_KNOB4 = 5): free for later features. */
 #ifndef LSDJ_ENC_KNOB3
-#define LSDJ_ENC_KNOB3     4   /* ENC_KNOB3 */
+#define LSDJ_ENC_KNOB3     (-1)
 #endif
 #ifndef LSDJ_ENC_KNOB4
-#define LSDJ_ENC_KNOB4     5   /* ENC_KNOB4 */
+#define LSDJ_ENC_KNOB4     (-1)
 #endif
 /* HOME toggles the piano keys between button mode and note mode (LSDj keyboard,
    PROJECT > SYNC = KEYBD). */
@@ -67,17 +67,37 @@ typedef struct {
     uint32_t ignore;   /* keys held across a mode switch: ignored until let go */
     uint32_t notes_on; /* note-mode keys currently sounding */
     int8_t note_of[27];
+    /* From the settings menu (lsdj_input_config): */
+    uint8_t knob_out[4][2];   /* {counter-clockwise, clockwise} per knob */
+    uint8_t play_btn, rec_btn;
+    uint32_t select_keys;     /* extra Select key(s) in button mode */
 } lsdj_input_t;
 
 static const int8_t lsdj_knob_enc[4] = {
     LSDJ_ENC_PRESETS, LSDJ_ENC_ALGORITHM, LSDJ_ENC_KNOB3, LSDJ_ENC_KNOB4 };
 /* {counter-clockwise, clockwise} */
 static const uint8_t lsdj_knob_out[4][2] = {
-    {GP_LEFT, GP_RIGHT}, {GP_UP, GP_DOWN}, {GP_SELECT, GP_START}, {GP_B, GP_A} };
+    {GP_UP, GP_DOWN}, {GP_LEFT, GP_RIGHT}, {GP_SELECT, GP_START}, {GP_B, GP_A} };
+
+/* Settings: knobs_swapped gives PRESETS left/right and ALGORITHM up/down;
+   presets_rev / algo_rev reverse those two knobs; play_is_select swaps PLAY and
+   REC; select_key_mask adds Select on those piano keys in button mode. */
+static inline void lsdj_input_config(lsdj_input_t *s, int knobs_swapped, int presets_rev, int algo_rev,
+                                     int play_is_select, uint32_t select_key_mask) {
+    for (unsigned i = 0; i < 4; i++) { s->knob_out[i][0] = lsdj_knob_out[i][0]; s->knob_out[i][1] = lsdj_knob_out[i][1]; }
+    if (knobs_swapped)
+        for (unsigned k = 0; k < 2; k++) { uint8_t a = s->knob_out[0][k]; s->knob_out[0][k] = s->knob_out[1][k]; s->knob_out[1][k] = a; }
+    if (presets_rev) { uint8_t a = s->knob_out[0][0]; s->knob_out[0][0] = s->knob_out[0][1]; s->knob_out[0][1] = a; }
+    if (algo_rev) { uint8_t a = s->knob_out[1][0]; s->knob_out[1][0] = s->knob_out[1][1]; s->knob_out[1][1] = a; }
+    s->play_btn = play_is_select ? GP_SELECT : GP_START;
+    s->rec_btn = play_is_select ? GP_START : GP_SELECT;
+    s->select_keys = select_key_mask;
+}
 
 static inline void lsdj_input_init(lsdj_input_t *s) {
     lsdj_knob_t z = {0, 0, 0, 0};
     for (unsigned i = 0; i < 4; i++) s->knob[i] = z;
+    lsdj_input_config(s, 0, 0, 0, 0, 0);
     s->mode = LSDJ_KEYS_BUTTONS; s->octave = 0;
     s->prev_buttons = 0; s->ignore = 0; s->notes_on = 0;
 }
@@ -125,6 +145,7 @@ static inline uint32_t lsdj_input_frame(lsdj_input_t *s, uint32_t notes,
     uint32_t p = 0;
     if (s->mode == LSDJ_KEYS_BUTTONS) {
         p |= gp_input_keys(keys, 0);
+        if (keys & s->select_keys) p |= GP_SELECT;
     } else {
         if (lsdj_pressed(buttons, before, LSDJ_BTN_OCT_DOWN) && s->octave > -2) s->octave--;
         if (lsdj_pressed(buttons, before, LSDJ_BTN_OCT_UP) && s->octave < 2) s->octave++;
@@ -138,11 +159,11 @@ static inline uint32_t lsdj_input_frame(lsdj_input_t *s, uint32_t notes,
         }
         s->notes_on = keys;
     }
-    if (buttons & (1u << LSDJ_BTN_PLAY)) p |= GP_SELECT;
-    if (buttons & (1u << LSDJ_BTN_REC)) p |= GP_START;
+    if (buttons & (1u << LSDJ_BTN_PLAY)) p |= s->play_btn;
+    if (buttons & (1u << LSDJ_BTN_REC)) p |= s->rec_btn;
     for (unsigned i = 0; i < 4; i++) {
         int e = lsdj_knob_enc[i];
-        p |= lsdj_knob_frame(&s->knob[i], lsdj_knob_out[i], e >= 0 ? enc[e] : 0);
+        p |= lsdj_knob_frame(&s->knob[i], s->knob_out[i], e >= 0 ? enc[e] : 0);
     }
     return p;  /* gp_buttons() cancels opposite directions */
 }

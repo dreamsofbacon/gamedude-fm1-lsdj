@@ -27,7 +27,12 @@ typedef struct {
     uint32_t magic, version, seq, len, data_crc, hdr_crc;
 } lsdj_save_hdr_t;
 
-static uint8_t lsdj_save_buf[4096];   /* RAM bounce buffer for reads */
+/* RAM bounce buffer for reads (boot only): the board may lend one (LSDJ_SAVE_BUF, 4096 bytes) */
+#define LSDJ_SAVE_BUF_N 4096u
+#ifndef LSDJ_SAVE_BUF
+static uint8_t lsdj_save_buf_mem[LSDJ_SAVE_BUF_N];
+#define LSDJ_SAVE_BUF lsdj_save_buf_mem
+#endif
 
 static uint32_t lsdj_crc32(uint32_t crc, const uint8_t *p, uint32_t n) {
     crc = ~crc;
@@ -60,11 +65,11 @@ static int lsdj_save_newest(uint32_t len, lsdj_save_hdr_t *best) {
 /* Copy the slot's data into ram (len bytes) and check its CRC. 0 = ok. */
 static int lsdj_save_read_slot(unsigned slot, const lsdj_save_hdr_t *h, uint8_t *ram, uint32_t len) {
     uint32_t base = lsdj_save_slot_off(slot) + 0x1000u, crc = 0;
-    for (uint32_t o = 0; o < len; o += sizeof lsdj_save_buf) {
-        uint32_t n = len - o < sizeof lsdj_save_buf ? len - o : sizeof lsdj_save_buf;
-        if (LSDJ_FL_READ(base + o, lsdj_save_buf, n)) return -1;
-        crc = lsdj_crc32(crc, lsdj_save_buf, n);
-        memcpy(ram + o, lsdj_save_buf, n);
+    for (uint32_t o = 0; o < len; o += LSDJ_SAVE_BUF_N) {
+        uint32_t n = len - o < LSDJ_SAVE_BUF_N ? len - o : LSDJ_SAVE_BUF_N;
+        if (LSDJ_FL_READ(base + o, LSDJ_SAVE_BUF, n)) return -1;
+        crc = lsdj_crc32(crc, LSDJ_SAVE_BUF, n);
+        memcpy(ram + o, LSDJ_SAVE_BUF, n);
         LSDJ_FL_IDLE();
     }
     return crc == h->data_crc ? 0 : -2;
@@ -104,9 +109,9 @@ static int lsdj_save_store(const uint8_t *ram, uint32_t len) {
     }
     /* Read back before committing. */
     uint32_t crc = 0, want = lsdj_crc32(0, ram, len);
-    for (uint32_t o = 0; o < len; o += sizeof lsdj_save_buf) {
-        if (LSDJ_FL_READ(base + 0x1000u + o, lsdj_save_buf, sizeof lsdj_save_buf)) return -4;
-        crc = lsdj_crc32(crc, lsdj_save_buf, sizeof lsdj_save_buf);
+    for (uint32_t o = 0; o < len; o += LSDJ_SAVE_BUF_N) {
+        if (LSDJ_FL_READ(base + 0x1000u + o, LSDJ_SAVE_BUF, LSDJ_SAVE_BUF_N)) return -4;
+        crc = lsdj_crc32(crc, LSDJ_SAVE_BUF, LSDJ_SAVE_BUF_N);
         LSDJ_FL_IDLE();
     }
     if (crc != want) return -5;

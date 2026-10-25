@@ -59,16 +59,19 @@ static int lsdj_slot_parse(const volatile uint8_t *w, uint32_t capacity, lsdj_sl
     s->logical_banks = lsdj_slot_u16(w + 10);
     s->stored_banks = lsdj_slot_u16(w + 12);
     s->kits = lsdj_slot_u16(w + 14);
-    if (s->logical_banks < 2 || s->logical_banks > LSDJ_SLOT_MAX_BANKS || !s->stored_banks ||
+    if (s->logical_banks < 2 || s->logical_banks > LSDJ_SLOT_MAX_BANKS ||
+        (s->logical_banks & (s->logical_banks - 1u)) || !s->stored_banks || s->kits > s->stored_banks ||
         s->stored_banks > s->logical_banks ||
         s->stored_banks > (capacity - LSDJ_SLOT_HDR) / LSDJ_SLOT_BANK) return LSDJ_SLOT_BAD_LAYOUT;
+    unsigned next = 0;
     for (unsigned b = 0; b < LSDJ_SLOT_MAX_BANKS; b++) {
         uint8_t m = w[20 + b];
         if (b >= s->logical_banks ? m != 0xff : (m != 0xff && m >= s->stored_banks))
             return LSDJ_SLOT_BAD_LAYOUT;
         s->bank_map[b] = m;
+        if (m != 0xff && m != next++) return LSDJ_SLOT_BAD_LAYOUT;
     }
-    if (s->bank_map[0] != 0) return LSDJ_SLOT_BAD_LAYOUT;
+    if (s->bank_map[0] != 0 || next != s->stored_banks) return LSDJ_SLOT_BAD_LAYOUT;
     if (lsdj_slot_u32(w + 16) !=
         lsdj_slot_crc32(0, w + LSDJ_SLOT_HDR, s->stored_banks * LSDJ_SLOT_BANK)) return LSDJ_SLOT_BAD_DATA;
     return LSDJ_SLOT_OK;

@@ -8,7 +8,11 @@
 #define FELUCCA_OTA_DRYRUN 0
 /* Package identity, reported to M-UPGRADE: "FM-1_" + exactly 3 digits (4 = "incompatible"),
    newer number to update in place. LSDj alpha N = FM-1_9NN (alpha 12 = FM-1_912). Bump per release. */
-#define FELUCCA_ID "FM-1_913"
+#ifdef CART_SLOT_CAPACITY
+#define FELUCCA_ID CART_SLOT_PRODUCT
+#else
+#define FELUCCA_ID "FM-1_966"
+#endif
 #define RING_PUBLISH() __asm__ volatile("csync" ::: "memory")
 /* The flash driver may also write the LSDj save pool (lsdj_state.h, 0x97000..0xE0000 =
    Felucca's data store, FL_DATA); the updater below stays limited to OTA staging. */
@@ -17,8 +21,10 @@
 #include "fm1_flash.h"
 #include "../vendor/felucca/firmware/src/usb.c"
 #include "../vendor/felucca/firmware/src/ota.c"
+/* MIDI IN on the TRS jack (Felucca): clock and transport join the USB ring. */
+#include "../vendor/felucca/firmware/src/midi_uart.c"
 static uint8_t recovery_flash_ok;
-/* board.c: handles the application's own SysEx frames (LSDj saves); 1 = handled. */
+/* board.c: the web page's link (firmware/lsdj_link.h); 1 = the frame was its. */
 static int app_sysex_frame(const uint8_t *frame,uint32_t size);
 static uint32_t ota_now_ms(void){return fm1_ms;}
 static void ota_idle(void){fm1_wdt_feed();}
@@ -48,12 +54,14 @@ static void recovery_tick(void){
     static uint32_t last,acc,sub;
     uint32_t now=fm1_ticks();acc+=now-last;last=now;
     fm1_ms+=acc/24000u;acc%=24000u;
-    if(++sub==5){sub=0;usb_poll();}
+    if(++sub==5){sub=0;usb_poll();uart_midi_poll();}
 }
 static void recovery_init(void){
     uint32_t f=irq_save();recovery_flash_ok=FL_FAR(fl_jedec_ram)()==0x856014u;irq_restore(f);
     /* Only stale OTA loader/record sectors; never presets, user data or calibration. */
     if(recovery_flash_ok)ota_boot_cleanup();
+    /* TRS MIDI IN: PORTH is also written by the TIMER5 input scan, so no ISR meanwhile */
+    f=irq_save();uart_midi_init();irq_restore(f);
     usb_start();
 }
 static void recovery_service(void){
@@ -78,8 +86,14 @@ static void recovery_service(void){
     }else if(ota_frame_get(&request,&request_size)&&app_sysex_frame(request,request_size)){
         ota_frame_done();
     }else ota_service();
+#ifdef FM1_MIDI_IN
+    /* Musical MIDI events (USB, TRS): to the board, with where they came from (1 USB, 2 TRS). */
+    while(mi_r!=mi_w){uint32_t p=midi_in_q[mi_r%MQ],at=midi_in_ms[mi_r%MQ],src=midi_in_source[mi_r%MQ];mi_r++;FM1_MIDI_IN(p,at,src);}
+    if(midi_in_overflow){uint32_t f=irq_save();mi_r=mi_w;midi_in_overflow=0;irq_restore(f);}
+#else
     /* GameDude does not consume musical MIDI events. Keep that ring drained. */
     uint32_t f=irq_save();mi_r=mi_w;midi_in_overflow=0;irq_restore(f);
+#endif
     if(usb.uboot_req){video_stop();audio_stop();gb_bootguard.pending=0;usb_detach();fm1_delay_ms(30);fm1_enter_uboot();}
     if(usb.ota_req){
         usb.ota_req=0;

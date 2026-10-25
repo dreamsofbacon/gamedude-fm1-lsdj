@@ -1,0 +1,15 @@
+# The repository is LF throughout; the tree is edited from Windows and WSL.
+* text=auto eol=lf
+
+*.gb binary
+*.gbc binary
+*.sav binary
+*.fwsc binary
+*.bin binary
+*.png binary
+*.zip binary
+*.wasm binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.ico binary

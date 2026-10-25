@@ -5,9 +5,17 @@
 #define GB_VIDEO_BARRIER() __asm__ volatile("csync" ::: "memory")
 #include "video_job.h"
 static gb_video_job_t video_job;
+#if GB_SMK37
 static uint16_t video_source[GB_VIDEO_PIXELS] __attribute__((section(".pool"),aligned(32)));
+#else
+/* FM-1: CPU1 runs the emulator (gp_core1_step) and CPU0 scales pictures from
+   gp_pixels(), so CPU1's scaling job never runs and needs no 46 KiB source copy. */
+static uint16_t video_source[1];
+#endif
 static uint32_t video_stacks[2048] __attribute__((section(".cpu1_stacks"),aligned(32),used));
 static volatile uint32_t video_ready;
+/* 1: CPU1 runs the emulator (gp_core1_step) instead of scaling pictures. */
+static volatile uint32_t core1_emu;
 volatile uint32_t video_stage;
 static volatile uint32_t video_core,video_worker_jobs,video_work_max_ticks;
 static uint32_t video_launch_ready,video_retire_reason,video_retire_ticks;
@@ -33,6 +41,11 @@ void __attribute__((section(".dsp_text"),noreturn,used)) gb_core1_main(void){
  uint32_t core;__asm__ volatile("%0 = cnum" : "=r"(core));
  video_core=core;video_stage=4;GB_VIDEO_BARRIER();video_ready=1;GB_VIDEO_BARRIER();
  for(;;){
+#if !GB_SMK37
+  gp_core1_step();continue;                  /* FM-1: the emulator, in RAM */
+#else
+  if(core1_emu){gp_core1_step();continue;}
+#endif
   if(!video_job.request||video_job.request==video_job.complete)continue;
   uint32_t start=*(volatile uint32_t*)0x10804u;
   int done=gb_video_work(&video_job,video_source,screen);
@@ -43,8 +56,25 @@ void __attribute__((section(".dsp_text"),noreturn,used)) gb_core1_main(void){
   }
  }
 }
+/* Before CPU1 is stopped (SAVE, a firmware update, a fault), a running emulator
+   is parked between frames: it then reads nothing but gp_core1 in RAM, so the
+   flash may be written. 100 ms at most; a hung CPU1 is stopped anyway. */
+/* Park the emulator on CPU1 between frames (it then reads only gp_core1, in
+   RAM, so the flash may be written). 1 = parked, or nothing runs on CPU1; 0 =
+   not parked within `ticks` (the request is withdrawn). */
+static int core1_park(uint32_t ticks){
+ if(!(core1_emu&&video_online))return 1;
+ gp_core1.pause_gen++;video_barrier();gp_core1.pause_req=1;
+ uint32_t t0=fm1_ticks();
+ while(gp_core1.paused_gen!=gp_core1.pause_gen)
+  if((uint32_t)(fm1_ticks()-t0)>=ticks){video_barrier();gp_core1.pause_req=0;return 0;}
+ video_barrier();return 1;
+}
+static void core1_unpark(void){video_barrier();gp_core1.pause_req=0;}
 static void video_stop(void){
+ if(core1_emu&&video_online)(void)core1_park(2400000u);   /* 100 ms; a hung CPU1 is stopped anyway */
  fm1_core1_stop();video_barrier();video_online=0;video_pending=0;video_guard.running=0;
+ gp_core1.pause_req=0;
 }
 static void video_retire(void){
  video_stop();video_guard.barred=1;video_fallbacks++;
@@ -71,6 +101,9 @@ static void video_start(uint32_t cold){
  if(!video_online){video_retire_reason=1;video_retire();}
 }
 static void video_submit(const uint16_t *pixels){
+#if !GB_SMK37
+ video_scale_local(pixels,screen);return;   /* FM-1: always on CPU0 (CPU1 emulates) */
+#endif
  if(!video_online){video_scale_local(pixels,screen);return;}
  for(unsigned i=0;i<GB_VIDEO_PIXELS;i++)video_source[i]=pixels[i];
  video_job.hash=video_hash_local(video_source);

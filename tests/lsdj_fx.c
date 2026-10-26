@@ -52,6 +52,49 @@ int main(void) {
     }
     puts("bypass: 200000 random samples identical to the plain mix              ok");
 
+    /* All FX bypass: bit-exact dry/mutes, unchanged settings and continuous DSP state. */
+    {
+        static uint8_t wet_echo[LSDJ_FX_ECHO_LEN];
+        lsdj_fx_t wet;
+        reset();
+        F.p.comp = 90; F.p.fx_off = 2;
+        F.p.m[FXM_TIME] = 1; F.p.m[FXM_MIX] = 100; F.p.m[FXM_FEEDBACK] = 80;
+        for (unsigned c = 0; c < 4; c++) {
+            F.p.ch[c][FXP_TYPE] = 1; F.p.ch[c][FXP_CUTOFF] = 80;
+            F.p.ch[c][FXP_DRIVE] = 70; F.p.ch[c][FXP_SEND] = 90;
+            F.p.ch[c][FXP_CRUSH] = 40; F.p.ch[c][FXP_DECIM] = 20;
+            F.p.q[c][FXQ_LFO_RATE] = 60; F.p.q[c][FXQ_LFO_DEPTH] = 40;
+        }
+        lsdj_fx_update(&F);
+        wet = F; wet.echo = wet_echo; memcpy(wet_echo, echo, sizeof echo);
+        lsdj_fx_params_t saved = F.p;
+        F.p.bypass = 1; lsdj_fx_update(&F);
+        int differs = 0;
+        for (unsigned i = 0; i < 100000; i++) {
+            int16_t s[5], dry[5]; int32_t l, r, wl, wr, dl, dr;
+            F.mute = wet.mute = (uint8_t)((i / 1000) & 15);
+            for (unsigned c = 0; c < 4; c++) s[c] = (int16_t)(rand() % 8001 - 4000);
+            s[4] = (int16_t)(rand() & 0x3FFF);
+            memcpy(dry, s, sizeof dry);
+            for (unsigned c = 0; c < 4; c++) if (F.mute & (1u << c)) dry[c] = 0;
+            plain(dry, &dl, &dr);
+            lsdj_fx_mix(&F, s, &l, &r); lsdj_fx_mix(&wet, s, &wl, &wr);
+            assert(l == dl && r == dr);
+            differs |= l != wl || r != wr;
+        }
+        assert(differs && !memcmp(F.c, wet.c, sizeof F.c) && !memcmp(echo, wet_echo, sizeof echo));
+        assert(F.echo_pos == wet.echo_pos && F.comp_env == wet.comp_env);
+        F.p.bypass = 0; lsdj_fx_update(&F);
+        assert(!memcmp(&saved, &F.p, sizeof saved));
+        for (unsigned i = 0; i < 1000; i++) {
+            int16_t s[5] = {500, -300, 700, 0, (int16_t)ALL_LR};
+            int32_t l, r, wl, wr;
+            lsdj_fx_mix(&F, s, &l, &r); lsdj_fx_mix(&wet, s, &wl, &wr);
+            assert(l == wl && r == wr);
+        }
+        puts("All FX: exact dry/mutes, retained settings, echo/LFO/compressor continuity ok");
+    }
+
     /* 2. Filters. */
     reset(); F.p.ch[0][FXP_TYPE] = 1; F.p.ch[0][FXP_CUTOFF] = 40; lsdj_fx_update(&F);   /* low-pass ~200 Hz */
     int32_t lo = sine_peak(0, 80, 20000), hi = sine_peak(0, 4000, 20000);

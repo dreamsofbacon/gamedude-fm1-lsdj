@@ -17,31 +17,34 @@ enum { FXK_CUTOFF, FXK_RESO, FXK_DRIVE, FXK_CRUSH, FXK_DECIM, FXK_SEND,         
        FXK_TYPE, FXK_FXON, FXK_SYNC, FXK_MODE, FXK_FREEZE,                         /* choices */
        /* alpha 66: per channel (warm, LFO rate and depth 0..127; distortion, shape, destination choices),
           and the master compressor (0..127) */
-       FXK_WARM, FXK_LFO_RATE, FXK_LFO_DEPTH, FXK_DIST, FXK_LFO_SHAPE, FXK_LFO_DEST, FXK_COMP, FXK_COUNT };
-static const char *const lsdj_fxk_name[FXK_COUNT] = {
+       FXK_WARM, FXK_LFO_RATE, FXK_LFO_DEPTH, FXK_DIST, FXK_LFO_SHAPE, FXK_LFO_DEST, FXK_COMP, FXK_ALLON, FXK_COUNT };
+#define FXK_NONE FXK_COUNT
+static const char *const lsdj_fxk_name[FXK_COUNT + 1] = {
     "CUTOFF", "RESO", "DRIVE", "CRUSH", "DECIMATE", "ECHO SEND", "ECHO TIME", "ECHO FDBK", "ECHO MIX",
     "ECHO TONE", "ECHO WOBBLE", "FILTER", "CHANNEL FX", "ECHO SYNC", "ECHO MODE", "FREEZE",
-    "WARM", "LFO RATE", "LFO DEPTH", "DISTORT", "SHAPE", "LFO TO", "COMPRESSOR" };
-static const char *const lsdj_fxk_short[FXK_COUNT] = {   /* 2 characters, over the bars (LSDj's 2-wide columns) */
+    "WARM", "LFO RATE", "LFO DEPTH", "DISTORT", "SHAPE", "LFO TO", "COMPRESSOR", "ALL FX", "" };
+static const char *const lsdj_fxk_short[FXK_COUNT + 1] = {   /* 2 characters, over the bars (LSDj's 2-wide columns) */
     "CT", "RS", "DR", "CR", "DC", "SN", "TM", "FB", "MX", "TN", "WB", "TY", "FX",
-    "SY", "MD", "FZ", "WM", "RT", "DP", "DS", "SH", "TO", "CP" };
+    "SY", "MD", "FZ", "WM", "RT", "DP", "DS", "SH", "TO", "CP", "FX", "" };
 
-static const char *const lsdj_fxk_label[FXK_COUNT] = {   /* up to 6 characters: the knob names on LSDj's bottom rows */
+static const char *const lsdj_fxk_label[FXK_COUNT + 1] = {   /* up to 6 characters: the knob names on LSDj's bottom rows */
     "CUTOFF", "RESO", "DRIVE", "CRUSH", "DECIM", "SEND", "TIME", "FDBK", "MIX", "TONE", "WOBBLE", "FILTER", "FX ON",
-    "SYNC", "MODE", "FREEZE", "WARM", "RATE", "DEPTH", "DIST", "SHAPE", "LFO TO", "COMP" };
+    "SYNC", "MODE", "FREEZE", "WARM", "RATE", "DEPTH", "DIST", "SHAPE", "LFO TO", "COMP", "ALL FX", "" };
 
 /* The pages: four effects each, KNOB 1..4 in order. */
-#define LSDJ_FX_PAGES 6u
+#define LSDJ_FX_PAGES 7u
+enum { FX_PAGE_MASTER, FX_PAGE_FILTER, FX_PAGE_DRIVE, FX_PAGE_LFO, FX_PAGE_LOFI, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD };
 static const uint8_t lsdj_fx_page_knob[LSDJ_FX_PAGES][4] = {
-    {FXK_DRIVE, FXK_TYPE, FXK_CUTOFF, FXK_RESO},
-    {FXK_DRIVE, FXK_DIST, FXK_WARM, FXK_COMP},
+    {FXK_ALLON, FXK_COMP, FXK_NONE, FXK_NONE},
+    {FXK_FXON, FXK_TYPE, FXK_CUTOFF, FXK_RESO},
+    {FXK_DRIVE, FXK_DIST, FXK_WARM, FXK_NONE},
     {FXK_LFO_RATE, FXK_LFO_DEPTH, FXK_LFO_SHAPE, FXK_LFO_DEST},
-    {FXK_CRUSH, FXK_DECIM, FXK_SEND, FXK_FXON},
+    {FXK_CRUSH, FXK_DECIM, FXK_SEND, FXK_NONE},
     {FXK_ECHO_TIME, FXK_ECHO_FB, FXK_ECHO_MIX, FXK_ECHO_TONE},
     {FXK_ECHO_WOBBLE, FXK_SYNC, FXK_MODE, FXK_FREEZE},
 };
-static const char *const lsdj_fx_page_name[LSDJ_FX_PAGES] = {"FILTER", "TONE", "LFO", "LO-FI", "ECHO", "ECHO MORE"};
-static const char lsdj_fx_page_letters[LSDJ_FX_PAGES + 1] = "FTWLEM";   /* the pages in LSDj's screen map (W: wave, the LFO) */
+static const char *const lsdj_fx_page_name[LSDJ_FX_PAGES] = {"MASTER", "FILTER", "DRIVE", "LFO", "LO-FI", "ECHO", "ECHO MOD"};
+static const char lsdj_fx_page_letters[LSDJ_FX_PAGES + 1] = "1234567";   /* matches the page counter */
 
 #define LSDJ_FX_ALL 4u      /* target: every channel */
 #define LSDJ_FX_CURSOR 5u   /* target: the channel under LSDj's cursor (default) */
@@ -87,10 +90,12 @@ static unsigned lsdj_fx_shown_ch(const lsdj_fx_ui_t *u) { unsigned t = lsdj_fx_e
 
 /* Raw value of k (on the target; the first channel if ALL). */
 static unsigned lsdj_fxk_get(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, unsigned k) {
+    if (k == FXK_NONE) return 0;
     if (lsdj_fxk_is_echo(k)) return fx->p.m[lsdj_fxk_m(k)];
     if (lsdj_fxk_is_q(k)) return fx->p.q[lsdj_fx_shown_ch(u)][lsdj_fxk_q(k)];
     if (lsdj_fxk_per_channel(k)) return fx->p.ch[lsdj_fx_shown_ch(u)][lsdj_fxk_ch_param(k)];
     switch (k) {
+    case FXK_ALLON: return !fx->p.bypass;
     case FXK_COMP: return fx->p.comp;
     case FXK_FXON: return !((fx->p.fx_off >> lsdj_fx_shown_ch(u)) & 1u);
     case FXK_SYNC: return fx->p.m[FXM_SYNC];
@@ -101,7 +106,7 @@ static unsigned lsdj_fxk_get(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, unsigne
 /* Number of choices of a choice effect (0 = a 0..127 value). */
 static unsigned lsdj_fxk_choices(unsigned k) {
     switch (k) {
-    case FXK_TYPE: return LSDJ_FX_FILTERS; case FXK_FXON: return 2; case FXK_SYNC: case FXK_MODE: case FXK_FREEZE: return 2;
+    case FXK_TYPE: return LSDJ_FX_FILTERS; case FXK_FXON: case FXK_ALLON: return 2; case FXK_SYNC: case FXK_MODE: case FXK_FREEZE: return 2;
     case FXK_DIST: return LSDJ_FX_DISTS; case FXK_LFO_SHAPE: return LSDJ_FX_SHAPES; case FXK_LFO_DEST: return LSDJ_FX_DESTS;
     }
     return 0;
@@ -124,6 +129,7 @@ static uint32_t lsdj_fx_num(char *d, uint32_t n, unsigned v) {
 static void lsdj_fxk_value(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, unsigned k, char out[6]) {
     unsigned v = lsdj_fxk_get(fx, u, k);
     out[0] = 0;
+    if (k == FXK_NONE) return;
     switch (k) {
     case FXK_TYPE: lsdj_fx_put(out, 0, lsdj_fx_filter_name[v % LSDJ_FX_FILTERS]); return;
     case FXK_DIST: lsdj_fx_put(out, 0, lsdj_fx_dist_name[v % LSDJ_FX_DISTS]); return;
@@ -137,7 +143,7 @@ static void lsdj_fxk_value(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, unsigned 
             else { out[0] = (char)('0' + h / 1000u); out[1] = (char)('0' + h / 100u % 10u); out[2] = '.'; out[3] = (char)('0' + h / 10u % 10u); out[4] = 0; }
         }
         return;
-    case FXK_FXON: lsdj_fx_put(out, 0, v ? "ON" : "OFF"); return;
+    case FXK_FXON: case FXK_ALLON: lsdj_fx_put(out, 0, v ? "ON" : "OFF"); return;
     case FXK_SYNC: lsdj_fx_put(out, 0, v ? "TEMPO" : "FREE"); return;
     case FXK_MODE: lsdj_fx_put(out, 0, v ? "PING" : "MONO"); return;
     case FXK_FREEZE: lsdj_fx_put(out, 0, v ? "ON" : "OFF"); return;
@@ -178,7 +184,7 @@ static void lsdj_fxk_value_short(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uns
    silent sets a mix. */
 #define LSDJ_FX_KNOB_STEP 2
 static void lsdj_fxk_turn(lsdj_fx_t *fx, lsdj_fx_ui_t *u, unsigned k, int steps) {
-    if (!steps) return;
+    if (!steps || k == FXK_NONE) return;
     int dir = steps > 0 ? 1 : -1;
     if (k == FXK_ECHO_TIME && fx->p.m[FXM_SYNC]) {
         int note = (int)lsdj_fx_note_of(fx->p.m[FXM_TIME]) + steps;
@@ -216,6 +222,8 @@ static void lsdj_fxk_turn(lsdj_fx_t *fx, lsdj_fx_ui_t *u, unsigned k, int steps)
             if (!fx->p.m[FXM_TIME]) fx->p.m[FXM_TIME] = 40;
             if (!fx->p.m[FXM_FEEDBACK]) fx->p.m[FXM_FEEDBACK] = 50;
         }
+    } else if (k == FXK_ALLON) {
+        fx->p.bypass = dir < 0;
     } else if (k == FXK_FXON) {               /* clockwise on, anticlockwise off (dry) */
         unsigned t = lsdj_fx_eff(u);
         for (unsigned c = 0; c < 4; c++)
@@ -234,7 +242,7 @@ static void lsdj_fxk_turn(lsdj_fx_t *fx, lsdj_fx_ui_t *u, unsigned k, int steps)
 static int lsdj_fx_knobs(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const int32_t steps[4]) {
     int last = -1;
     for (unsigned k = 0; k < 4; k++) {
-        if (!steps[k]) continue;
+        if (!steps[k] || lsdj_fx_page_knob[u->page % LSDJ_FX_PAGES][k] == FXK_NONE) continue;
         lsdj_fxk_turn(fx, u, lsdj_fx_page_knob[u->page % LSDJ_FX_PAGES][k], steps[k]);
         last = (int)k;
     }
@@ -261,7 +269,7 @@ static const char *lsdj_fxk_choice_short(unsigned k, unsigned i) {
     case FXK_TYPE: return filter[i % LSDJ_FX_FILTERS];
     case FXK_DIST: return dist[i % LSDJ_FX_DISTS];
     case FXK_LFO_SHAPE: return shape[i % LSDJ_FX_SHAPES];
-    case FXK_FXON: case FXK_FREEZE: return i ? "ON" : "OF";
+    case FXK_FXON: case FXK_ALLON: case FXK_FREEZE: return i ? "ON" : "OF";
     case FXK_SYNC: return i ? "TP" : "FR";
     case FXK_MODE: return i ? "PP" : "MO";
     case FXK_LFO_DEST: return dest[i % 3u];
@@ -292,12 +300,13 @@ static void lsdj_fx_bars(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, int hot, ch
     n = lsdj_fx_put(title, n, " "); n = lsdj_fx_num(title, n, pg + 1u); n = lsdj_fx_put(title, n, "/"); lsdj_fx_num(title, n, LSDJ_FX_PAGES);
     for (unsigned k = 0; k < 4; k++) {
         unsigned e = lsdj_fx_page_knob[pg][k];
+        if (e == FXK_NONE) { label[k][0] = value[k][0] = caption[k][0] = 0; level[k] = 0; continue; }
         lsdj_fx_put(label[k], 0, lsdj_fxk_short[e]);
         lsdj_fxk_value_short(fx, u, e, value[k]);
         caption[k][0] = 'K'; caption[k][1] = (char)('1' + k); caption[k][2] = 0;
         level[k] = (uint8_t)lsdj_fxk_level(fx, u, e);
     }
-    if (hot >= 0 && hot < 4) {
+    if (hot >= 0 && hot < 4 && lsdj_fx_page_knob[pg][hot] != FXK_NONE) {
         unsigned e = lsdj_fx_page_knob[pg][hot];
         char full[6]; lsdj_fxk_value(fx, u, e, full);
         const char *name = lsdj_fxk_name[e];
@@ -305,7 +314,7 @@ static void lsdj_fx_bars(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, int hot, ch
         big[0] = 'K'; big[1] = (char)('1' + hot); big[2] = ' '; big[3] = 0;
         uint32_t m = lsdj_fx_put(big, 3, name);
         m = lsdj_fx_put(big, m, " "); lsdj_fx_put(big, m, full);
-    } else lsdj_fx_put(big, 0, "SELECT: PAGE");
+    } else lsdj_fx_put(big, 0, fx->p.bypass ? "ALL FX OFF" : "SELECT: PAGE");
 }
 
 /* ---------- hold FX: piano key shortcuts ---------- */
@@ -365,7 +374,8 @@ static void lsdj_fx_pack(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uint32_t w[
     uint8_t b[68] = {0};
     for (unsigned c = 0; c < 4; c++) for (unsigned p = 0; p < FXP_CH_COUNT; p++) b[c * FXP_CH_COUNT + p] = fx->p.ch[c][p];
     for (unsigned m = 0; m < FXM_COUNT; m++) b[28 + m] = fx->p.m[m];
-    b[35] = fx->p.fx_off; b[36] = u->target; b[37] = 1; b[38] = u->page;   /* 37: was "live knobs" */
+    b[35] = fx->p.fx_off; b[36] = u->target; b[37] = 2; b[38] = u->page;   /* layout 2: MASTER first */
+    b[39] = fx->p.bypass;
     b[42] = LSDJ_FX_MARK; b[43] = fx->p.comp;
     for (unsigned c = 0; c < 4; c++) for (unsigned q = 0; q < FXQ_COUNT; q++) b[44 + c * FXQ_COUNT + q] = fx->p.q[c][q];
     for (unsigned i = 0; i < LSDJ_FX_WORDS; i++)
@@ -388,14 +398,21 @@ static int lsdj_fx_unpack_n(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const uint32_t *w, u
         if (q[FXQ_WARM] > 127 || q[FXQ_LFO_RATE] > 127 || q[FXQ_LFO_DEPTH] > 127 || q[FXQ_DIST] >= LSDJ_FX_DISTS ||
             q[FXQ_LFO_SHAPE] >= LSDJ_FX_SHAPES || q[FXQ_LFO_DEST] >= LSDJ_FX_DESTS) return 0;
     }
-    uint8_t m[FXM_COUNT] = {0, 0, 0, 0, 0, LSDJ_FX_TONE_FLAT, 0}, off = 0, target, page = 0;
+    uint8_t m[FXM_COUNT] = {0, 0, 0, 0, 0, LSDJ_FX_TONE_FLAT, 0}, off = 0, target, page = FX_PAGE_FILTER, bypass = 0;
     if (b[37] == 0xF1) {                     /* old: 3 echo values, target */
         for (unsigned i = 0; i < 3; i++) m[i] = b[28 + i];
         target = b[31];
     } else if (b[42] == LSDJ_FX_MARK) {
         for (unsigned i = 0; i < FXM_COUNT; i++) m[i] = b[28 + i];
         off = b[35]; target = b[36];
-        if (b[39] == 0 && b[40] == 0 && b[41] == 0) page = b[38];   /* else knob assignments: page 0 */
+        if (b[37] == 2) {
+            if (n != LSDJ_FX_WORDS || b[38] >= LSDJ_FX_PAGES || b[39] > 1 || b[40] || b[41]) return 0;
+            page = b[38]; bypass = b[39];
+        } else if (b[37] > 1) return 0;
+        else if (b[39] == 0 && b[40] == 0 && b[41] == 0) {
+            static const uint8_t old4[] = {FX_PAGE_FILTER, FX_PAGE_LOFI, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD};
+            page = n == LSDJ_FX_WORDS_OLD ? old4[b[38] % 4u] : (uint8_t)(1u + b[38] % 6u);
+        }
     } else return 0;
     for (unsigned i = 0; i < FXM_COUNT; i++) if (m[i] > 127) return 0;
     if (m[FXM_SYNC] > 1 || m[FXM_MODE] > 1 || off > 15 || target > 5) return 0;
@@ -403,9 +420,24 @@ static int lsdj_fx_unpack_n(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const uint32_t *w, u
     for (unsigned i = 0; i < FXM_COUNT; i++) fx->p.m[i] = m[i];
     for (unsigned c = 0; c < 4; c++) for (unsigned q = 0; q < FXQ_COUNT; q++) fx->p.q[c][q] = b[44 + c * FXQ_COUNT + q];
     fx->p.comp = comp;
+    fx->p.bypass = bypass;
     (void)target;   /* the effects always follow LSDj's cursor now (a saved lock was easy to set by accident) */
     fx->p.fx_off = off; u->target = LSDJ_FX_CURSOR; u->page = (uint8_t)(page % LSDJ_FX_PAGES);
     lsdj_fx_update(fx);
     return 1;
 }
 static int lsdj_fx_unpack(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const uint32_t w[LSDJ_FX_WORDS]) { return lsdj_fx_unpack_n(fx, u, w, LSDJ_FX_WORDS); }
+
+/* Older live clients cannot change effects they do not expose. Saved setups
+   use unpack_n directly, with the legacy defaults instead. */
+static int lsdj_fx_set_words(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const uint32_t *w, unsigned n) {
+    lsdj_fx_params_t before = fx->p;
+    if (!lsdj_fx_unpack_n(fx, u, w, n)) return 0;
+    if (n == LSDJ_FX_WORDS_OLD) {
+        memcpy(fx->p.q, before.q, sizeof before.q);
+        fx->p.comp = before.comp;
+    }
+    if (((w[9] >> 8) & 255u) != 2) fx->p.bypass = before.bypass;
+    lsdj_fx_update(fx);
+    return 1;
+}

@@ -1,10 +1,11 @@
 """Build the public LSDj firmware template: GameDude for FM-1 with an EMPTY ROM slot.
 
 The sibling Burrito website writes each user's own LSDj into the slot locally.
-The generic experimental template has identity FM-1_974 and supports read-only
-cartridge export for future ROM-free updates. It retains restored cursor FX
+The generic experimental template has identity FM-1_975 with a master FX bypass
+and reorganized controls. It supports read-only cartridge export for ROM-free updates
+and retains cursor FX support
 for a verified LSDj 9.3.9 program, without the channel tint. It includes the
-alpha 71 display and CPU1 save fixes. Normal ROM builds retain FM-1_971.
+alpha 71 display and CPU1 save fixes. Normal ROM builds also use FM-1_975.
 This template contains no LSDj ROM.
 
 Run in WSL from the GameDude root, with the FM-1 toolchain and AC79 SDK:

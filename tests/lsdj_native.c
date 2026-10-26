@@ -69,7 +69,10 @@ int main(void) {
     for (unsigned pg = 0; pg < LSDJ_FX_PAGES; pg++) {
         for (unsigned i = 0; i < 160 * 144; i++) px[i] = 0x7777;
         char names[4][7]; u.page = (uint8_t)pg; lsdj_fx_names(&u, names);
-        for (unsigned k = 0; k < 4; k++) assert(strlen(names[k]) >= 3 && strlen(names[k]) <= 6);   /* more than 2 letters, fits */
+        for (unsigned k = 0; k < 4; k++) {
+            if (lsdj_fx_page_knob[pg][k] == FXK_NONE) assert(!names[k][0]);
+            else assert(strlen(names[k]) >= 3 && strlen(names[k]) <= 6);
+        }
         lsdj_nat_names(&n, (const char (*)[7])names, (int)pg - 1);
         for (unsigned y = 0; y < 144; y++) for (unsigned x = 0; x < 160; x++)
             assert((px[y * 160 + x] != 0x7777) == (y >= 128 && x < 120));
@@ -77,6 +80,11 @@ int main(void) {
         lsdj_nat_pagemap(&n, lsdj_fx_page_letters, pg);
         for (unsigned y = 0; y < 144; y++) for (unsigned x = 0; x < 160; x++)
             if (!(y >= 120 && x >= 120)) assert(px[y * 160 + x] == 0x7777);
+        uint16_t actual[64];
+        unsigned x0 = 8u * (15u + pg % 5u), y0 = 8u * (16u + pg / 5u);
+        for (unsigned y = 0; y < 8; y++) memcpy(actual + y * 8, px + (y0 + y) * 160 + x0, 16);
+        lsdj_nat_tile_at(&n, 15u + pg % 5u, 16u + pg / 5u, lsdj_nat_field_tile(lsdj_fx_page_letters[pg]) + 0x45);
+        for (unsigned y = 0; y < 8; y++) assert(!memcmp(actual + y * 8, px + (y0 + y) * 160 + x0, 16));
     }
     assert(strlen(lsdj_fx_page_letters) == LSDJ_FX_PAGES);
     /* 0..127 values show as two hex digits, as LSDj's. */

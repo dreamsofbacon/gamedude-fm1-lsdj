@@ -58,6 +58,7 @@ typedef struct {
     uint8_t fx_off;                          /* bit c: channel c plays dry */
     uint8_t q[4][FXQ_COUNT];                 /* per channel, alpha 66 */
     uint8_t comp;                            /* master compressor amount */
+    uint8_t bypass;                          /* all effects dry; settings retained */
 } lsdj_fx_params_t;
 
 typedef struct {
@@ -330,13 +331,16 @@ static void lsdj_fx_echo_tick(lsdj_fx_t *f, int32_t in) {
    minigb_apu_split) with the effects; before the volume. */
 static void lsdj_fx_mix(lsdj_fx_t *f, const int16_t *smp, int32_t *lo, int32_t *ro) {
     uint32_t pan = (uint16_t)smp[4], vl = (pan >> 8) & 7u, vr = (pan >> 11) & 7u;
-    if (!f->active) {                        /* exactly MiniGB: int16 sums in channel order */
+    int16_t dry_l = 0, dry_r = 0;
+    if (!f->active || f->p.bypass) {          /* exactly MiniGB: int16 sums in channel order */
         int16_t L = 0, R = 0;
         for (uint32_t c = 0; c < 4; c++) {
+            if ((f->mute >> c) & 1u) continue;
             L = (int16_t)(L + smp[c] * (int32_t)((pan >> (4 + c)) & 1u) * (int32_t)vl);
             R = (int16_t)(R + smp[c] * (int32_t)((pan >> c) & 1u) * (int32_t)vr);
         }
-        *lo = L; *ro = R; return;
+        if (!f->active) { *lo = L; *ro = R; return; }
+        dry_l = L; dry_r = R;
     }
     int32_t L = 0, R = 0, send = 0;
     for (uint32_t c = 0; c < 4; c++) {
@@ -371,5 +375,7 @@ static void lsdj_fx_mix(lsdj_fx_t *f, const int16_t *smp, int32_t *lo, int32_t *
         g = g * (32768 + (int32_t)f->p.comp * 96) >> 15;
         L = L * g >> 15; R = R * g >> 15;
     }
-    *lo = lsdj_fx_clamp16(L); *ro = lsdj_fx_clamp16(R);
+    /* Keep DSP state advancing while bypassed, so echo/LFO do not resume stale. */
+    *lo = f->p.bypass ? dry_l : lsdj_fx_clamp16(L);
+    *ro = f->p.bypass ? dry_r : lsdj_fx_clamp16(R);
 }

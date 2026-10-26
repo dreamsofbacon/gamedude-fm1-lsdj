@@ -29,6 +29,7 @@ static void cursor_test(uint16_t addr) {
         if (c != expected[i]) fprintf(stderr, "cursor step %u: expected %u, got %u\n", i, expected[i], c);
         assert(c == expected[i]);
         lsdj_fx_init(&fx, echo); lsdj_fx_ui_init(&u);
+        u.page = FX_PAGE_FILTER;
         u.cursor_ch = (uint8_t)c;
         int32_t turn[4] = {0, 0, 5, 0};
         assert(lsdj_fx_knobs(&fx, &u, turn) == 2);

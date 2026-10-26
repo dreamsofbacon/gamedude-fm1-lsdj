@@ -737,12 +737,9 @@ static int lk_settings_set(uint32_t v){
     settings=t;settings_apply();return 1;
 }
 static void lk_fx_get(uint32_t w[LSDJ_LINK_FX_WORDS]){lsdj_fx_pack(&fx,&fxu,w);}
-/* 17 words; or 11 (a page from before alpha 66): those replace the first 11, the new effects stay */
+/* Older clients retain effects they cannot expose; saved page numbers migrate. */
 static int lk_fx_set(const uint32_t *w,unsigned n){
-    uint32_t all[LSDJ_FX_WORDS];lsdj_fx_pack(&fx,&fxu,all);
-    if(n!=LSDJ_FX_WORDS&&n!=LSDJ_FX_WORDS_OLD)return 0;
-    for(unsigned i=0;i<n;i++)all[i]=w[i];
-    return lsdj_fx_unpack(&fx,&fxu,all);
+    return lsdj_fx_set_words(&fx,&fxu,w,n);
 }
 typedef char lk_fx_words_ok[LSDJ_LINK_FX_WORDS==LSDJ_FX_WORDS&&LSDJ_LINK_FX_WORDS_OLD==LSDJ_FX_WORDS_OLD?1:-1];
 static void lk_theme_get(uint16_t c[8]){lsdj_theme_to8(&lsdj_theme_custom,c);}

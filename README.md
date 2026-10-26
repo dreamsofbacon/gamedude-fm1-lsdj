@@ -1,16 +1,35 @@
-# Dreamy_bacon's LSDJ Burrito
-
-LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
-
-- **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): songs, effects, settings and colours over USB (or Bluetooth), and installing an LSDJ Burrito `.fwsc` with safeguards. You bring your own `lsdj.gb`: LSDj is not included, and your ROM never leaves your computer.
-- **Status:** alpha 71; experimental ROM-free template FM-1_974 adds read-only cartridge export for future updates without choosing the ROM again. Cursor-following FX for verified LSDj 9.3.9 code remains enabled without channel highlighting. The template remains experimental and not yet tested on hardware.
-- **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
-
-Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
-
----
-
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: master FX controls (FM-1_975)
+
+The first FX page is **MASTER**: K1 switches **All FX** on/off; K2 is the
+shared compressor. Turning All FX off produces the original dry mix, including
+channel mutes. Channel effects, echo and compressor settings are retained;
+their internal state keeps advancing so re-enabling does not resume a stale
+echo or LFO. Bypass is not a CPU-saving mode.
+
+| Page | K1 | K2 | K3 | K4 |
+| --- | --- | --- | --- | --- |
+| 1 MASTER | All FX | Compressor | - | - |
+| 2 FILTER | Channel FX | Filter type | Cutoff | Resonance |
+| 3 DRIVE | Drive | Distortion | Warmth | - |
+| 4 LFO | Rate | Depth | Shape | Destination |
+| 5 LO-FI | Crush | Decimate | Echo send | - |
+| 6 ECHO | Time | Feedback | Mix | Tone |
+| 7 ECHO MOD | Wobble | Sync | Mode | Freeze |
+
+SELECT changes pages; the screen map uses the same numbers across two rows.
+Unused knobs are blank/inert. Existing FX-held mute, channel bypass and freeze
+shortcuts are unchanged. Accent bars and the no-channel-tint styling remain.
+The webpage mirrors these pages on supporting firmware, retaining the original
+layout on older firmware and explicitly explaining the unavailable master switch.
+
+The 17-word FX format uses byte 37 = 2 for this layout and byte 39 for global
+bypass (0 on, 1 off). SAVE/Keep and settings backups preserve the switch.
+Legacy saved setups default to All FX on and migrate page indices. Older live
+clients preserve effects they cannot control, including global bypass.
+The unresolved physical cursor-following report is separate; this reorganization
+does not claim to fix it.
 
 ## LSDj Burrito: alpha 71 effects display
 
@@ -47,9 +66,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_974 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_975 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_971 for alpha 71).
+Normal ROM builds use the current alpha identity (FM-1_975 for alpha 75).
 
 From this repository in WSL:
 

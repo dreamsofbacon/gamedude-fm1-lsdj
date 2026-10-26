@@ -154,6 +154,7 @@ static void lsdj_nat_bars(const lsdj_nat_t *n, const lsdj_ov_bars_t *b, uint16_t
 static void lsdj_nat_names(const lsdj_nat_t *n, const char names[4][7], int hot) {
     lsdj_nat_clear(n, 0, LSDJ_NAT_NAME_ROW, LSDJ_NAT_PANEL, 2);
     for (unsigned k = 0; k < 4u; k++) {
+        if (!names[k][0]) continue;
         unsigned row = LSDJ_NAT_NAME_ROW + k / 2u, col = (k % 2u) * 7u;   /* column 14 stays blank before LSDj's map */
         char d[2] = {(char)('1' + k), 0};
         lsdj_nat_text(n, col, row, d, 1, 1);
@@ -164,13 +165,14 @@ static void lsdj_nat_names(const lsdj_nat_t *n, const char names[4][7], int hot)
 /* ---------- the pages, in LSDj's screen map (columns 15..19, rows 15..17) ----------
    While the effects panel is open the map shows the pages the way LSDj shows its
    screens (its map letters are the value-field tiles; the screen you are on is
-   that tile +0x45 again, e.g. S 0x65 / 0xAA): "FX" over a row of page letters. */
+   that tile +0x45 again, e.g. S 0x65 / 0xAA): "FX" over up to two rows. */
 static void lsdj_nat_pagemap(const lsdj_nat_t *n, const char *letters, unsigned page) {
     lsdj_nat_clear(n, LSDJ_NAT_PANEL, 15, LSDJ_NAT_COLS - LSDJ_NAT_PANEL, 3);
     lsdj_nat_text(n, LSDJ_NAT_PANEL, 15, "FX", 2, 0);
-    for (unsigned i = 0; letters[i] && LSDJ_NAT_PANEL + i < LSDJ_NAT_COLS; i++) {
+    unsigned width = LSDJ_NAT_COLS - LSDJ_NAT_PANEL;
+    for (unsigned i = 0; letters[i] && i < 2u * width; i++) {
         int t = lsdj_nat_field_tile(letters[i]);
-        lsdj_nat_tile_at(n, LSDJ_NAT_PANEL + i, 16, i == page ? t + 0x45 : t);
+        lsdj_nat_tile_at(n, LSDJ_NAT_PANEL + i % width, 16 + i / width, i == page ? t + 0x45 : t);
     }
 }
 

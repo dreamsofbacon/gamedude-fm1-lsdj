@@ -31,7 +31,14 @@ int main(void) {
     build();
     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_OK);
     assert(s.logical_banks == 64 && s.stored_banks == 3 && s.kits == 1);
+    assert(s.cursor_addr == 0);
     assert(s.bank_map[0] == 0 && s.bank_map[1] == 1 && s.bank_map[8] == 2 && s.bank_map[2] == 0xff && s.bank_map[127] == 0xff);
+    win[148] = 1; reseal();
+    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_OK && s.cursor_addr == 0xC41D);
+    win[148] = 0; reseal();
+    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_OK && s.cursor_addr == 0);
+    win[148] = 2; reseal();
+    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
 
     build(); win[0] = 'X';                     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_HEADER);
     build(); win[30] ^= 1;                     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_HEADER);

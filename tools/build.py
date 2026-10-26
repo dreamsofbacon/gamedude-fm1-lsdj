@@ -4,7 +4,7 @@ from pathlib import Path
 from diagnostic import make_rom
 from prepare_apu import prepare
 ROOT=Path(__file__).resolve().parents[1]
-LSDJ_SLOT_PRODUCT='FM-1_972'
+LSDJ_SLOT_PRODUCT='FM-1_973'
 DEFAULT_ZIG=ROOT.parent/'Felucca/Felucca-website/build/wasm-tools/ziglang/zig.exe'
 # JieLi toolchain: $JIELI_TOOLCHAIN, else ~/.jieli/toolchain (Dinghy's get_toolchain.sh), else the upstream path.
 DEFAULT_TC=next((str(p) for p in [Path.home()/'.jieli/toolchain'] if p.is_dir()),
@@ -211,7 +211,7 @@ def native(a,sources):
     result['app_bytes']=len(image)
     if a.lsdj_slot:
         result.update(lsdj_slot=1,product=LSDJ_SLOT_PRODUCT,cartridge='empty LSDj slot',
-                      compatibility='experimental generic; version-specific memory helpers disabled')
+                      compatibility='experimental generic; verified cursor profile only, other memory helpers disabled')
     if ble:result.update(bluetooth='BLE-MIDI device (firmware/lsdj_ble.c)',ram_text_bytes=sym('_dsp_end')-0x1c00000,
         sram_free=0x1c74000-sym('_cpu1_stacks_hi'))
     if a.target=='smk37':result.update(usb_protocol='smk37-ram-v2',product=loader['product'],loader=loader)

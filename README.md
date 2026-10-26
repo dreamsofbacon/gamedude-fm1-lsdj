@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): songs, effects, settings and colours over USB (or Bluetooth), and installing an LSDJ Burrito `.fwsc` with safeguards. You bring your own `lsdj.gb`: LSDj is not included, and your ROM never leaves your computer.
-- **Status:** alpha 71; experimental ROM-free template FM-1_972. The ROM-free template for installing with your own LSDj from the page (below) is experimental and not yet tested on hardware.
+- **Status:** alpha 71; experimental ROM-free template FM-1_973 restores cursor-following FX for verified LSDj 9.3.9 code without channel highlighting. The template remains experimental and not yet tested on hardware.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -41,13 +41,13 @@ Cue/tempo panels keep their previous display. Knob behavior, DSP, audio buffers
 and saved-effect formats are unchanged. `tests/lsdj_native.c` checks all 128
 amount values, segment boundaries, all 2-6-choice selection positions and panel
 bounds; `tests/lsdj_fx_ui.c` checks matching selector/value labels and raw scales.
-The refreshed FM-1_972 webpage template includes these display changes and the
+The refreshed FM-1_973 webpage template includes these display changes and the
 CPU1 save fixes, but retains its generic-ROM limitations. Physical alpha 71
 and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_972 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_973 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
 Normal ROM builds use the current alpha identity (FM-1_971 for alpha 71).
 
@@ -67,14 +67,21 @@ The current template has 31 stored 16 KiB banks plus a 256-byte header. The brow
 requires explicit kit selection if the ROM exceeds this budget and preserves
 logical bank numbers. Unrecognized program/data banks cannot be discarded.
 The dynamic slot parser validates header/data CRCs and a complete sequential bank
-map before emulation. Generic slot builds disable the hard-coded 9.3.9 memory
-profile: tempo shortcuts, MIDI clock integration, cues and cursor-following FX
-are unavailable. Back up saves before switching versions.
+map before emulation. The browser enables the read-only cursor profile only
+when the program SHA-256 matches known LSDj 9.3.9 code; custom or omitted sample
+kits do not change this fingerprint. Slot byte 148 selects that profile under
+the header CRC. Cursor-following FX is restored without the channel tint.
+Unknown programs explicitly fall back to ALL channels, never title-based
+address guessing. Tempo shortcuts, MIDI clock integration and cues remain
+disabled in generic builds. Back up saves before switching versions.
 
 This template is **experimental, not hardware-validated**. Packaging and simulated
 OTA success do not establish boot/audio correctness or recoverability after
 interrupted flashing. `tests/lsdj_slot.c` tests slot parsing; `tests/lsdj_rom.c`
-accepts a private browser-generated slot for a 600-frame host emulator smoke test.
+accepts a private browser-generated slot for a 600-frame host emulator smoke test
+and, with a recognized cursor profile plus a private 128-KiB SONG-screen save
+as the second argument, checks all four real ROM cursor positions and
+channel-isolated cutoff changes.
 The sibling site's `tests/loader.mjs` tests browser packing and optional local ROMs.
 
 **Now with Bluetooth and Multi-game storage.**

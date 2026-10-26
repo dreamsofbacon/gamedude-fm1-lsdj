@@ -341,7 +341,9 @@ static uint16_t cursor_addr,tempo_addr,sync_off,armed_addr,row_addr,live_addr,so
 #define LSDJ_SYNC_KEYBD 5u
 static void cursor_detect(void){
 #ifdef CART_SLOT_CAPACITY
-    /* A title is not proof of a modified ROM's memory layout. */
+    /* The browser selects this read-only profile by program SHA-256, not title.
+       Other version-specific helpers remain disabled in generic builds. */
+    cursor_addr=cart_slot.cursor_addr;
     return;
 #endif
     /* row: 4 phrase rows (0..15, one per channel), live: 1 in live mode, songrow: 4 song

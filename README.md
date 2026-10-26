@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): songs, effects, settings and colours over USB (or Bluetooth), and installing an LSDJ Burrito `.fwsc` with safeguards. You bring your own `lsdj.gb`: LSDj is not included, and your ROM never leaves your computer.
-- **Status:** alpha (alpha 69). The ROM-free template for installing with your own LSDj from the page (below) is experimental and not yet tested on hardware.
+- **Status:** alpha 71; experimental ROM-free template FM-1_972. The ROM-free template for installing with your own LSDj from the page (below) is experimental and not yet tested on hardware.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -12,11 +12,44 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 
 # GameDude - FM-1 / SMK37 — v2.0
 
+## LSDj Burrito: alpha 71 effects display
+
+The on-device effects panel keeps LSDj's font, palette, four knob columns,
+active-knob readout, channel text and bottom labels. Amount bars now have eight
+segments: each spans 16 raw setting values (`10` hex), with partial fill between
+boundaries. The shared `00`, `20`, `40`, `60`, `7F` ruler matches the hex setting
+under each amount bar; `00` is empty and `7F` is full. Screen pixels quantize the
+fill, so the numeric value remains the precise reading.
+
+Alpha 71 fills the bars with the selected theme's accent colour instead of
+LSDj's muted value-field shade. Classic uses amber; other presets and CUSTOM
+use their own accent. The channel-column tint has been removed; channel identity
+remains in the text, and every bar has the same normal background.
+Empty markers, segment gaps, text and choice selectors keep their existing
+styling. Custom themes should use an accent distinct from their background.
+Rendering tests check accent/background separation across all preset entries,
+all four background shades and identical rendering for every channel selection.
+
+Filter types, distortion modes, LFO shapes/destinations and on/off modes appear
+as choice lists, with only the selected name inverted. Their two-letter codes
+match the value row; turning the knob shows the full name in the top readout.
+The amount scale is a **raw setting**, not Hz, milliseconds or a linear measure
+of audible intensity. Echo time and LFO rate retain their actual time/note/rate
+readouts when active, including in synced modes.
+
+Cue/tempo panels keep their previous display. Knob behavior, DSP, audio buffers
+and saved-effect formats are unchanged. `tests/lsdj_native.c` checks all 128
+amount values, segment boundaries, all 2-6-choice selection positions and panel
+bounds; `tests/lsdj_fx_ui.c` checks matching selector/value labels and raw scales.
+The refreshed FM-1_972 webpage template includes these display changes and the
+CPU1 save fixes, but retains its generic-ROM limitations. Physical alpha 71
+and template-combination confirmation are separate from host/emulator checks.
+
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_967 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_972 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal alpha 66 ROM builds remain FM-1_966.
+Normal ROM builds use the current alpha identity (FM-1_971 for alpha 71).
 
 From this repository in WSL:
 

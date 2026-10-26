@@ -4,6 +4,7 @@ from pathlib import Path
 from diagnostic import make_rom
 from prepare_apu import prepare
 ROOT=Path(__file__).resolve().parents[1]
+LSDJ_SLOT_PRODUCT='FM-1_972'
 DEFAULT_ZIG=ROOT.parent/'Felucca/Felucca-website/build/wasm-tools/ziglang/zig.exe'
 # JieLi toolchain: $JIELI_TOOLCHAIN, else ~/.jieli/toolchain (Dinghy's get_toolchain.sh), else the upstream path.
 DEFAULT_TC=next((str(p) for p in [Path.home()/'.jieli/toolchain'] if p.is_dir()),
@@ -136,7 +137,7 @@ def native(a,sources):
         storage=rom+b'\xff'*(capacity-len(rom))
     sparse=('' if bank_map is None else f'#define CART_SPARSE_BANKS {len(bank_map)}u\n'
             'static const unsigned char cart_bank_map[] = {'+','.join(map(str,bank_map))+'};\n')
-    if a.lsdj_slot:sparse=f'#define CART_SLOT_CAPACITY {capacity}u\n#define CART_SLOT_PRODUCT "FM-1_967"\n'
+    if a.lsdj_slot:sparse=f'#define CART_SLOT_CAPACITY {capacity}u\n#define CART_SLOT_PRODUCT "{LSDJ_SLOT_PRODUCT}"\n'
     (out/'cartridge.h').write_text('/* Local cartridge; never publish game ROMs. */\n'+sparse+'static const unsigned char cartridge[] = {\n'+
         ',\n'.join(','.join(str(b) for b in storage[i:i+32]) for i in range(0,len(storage),32))+'\n};\n')
     if a.target=='smk37':
@@ -209,7 +210,7 @@ def native(a,sources):
       'usb_updater':True,'save_persistence':'session RAM only'}
     result['app_bytes']=len(image)
     if a.lsdj_slot:
-        result.update(lsdj_slot=1,product='FM-1_967',cartridge='empty LSDj slot',
+        result.update(lsdj_slot=1,product=LSDJ_SLOT_PRODUCT,cartridge='empty LSDj slot',
                       compatibility='experimental generic; version-specific memory helpers disabled')
     if ble:result.update(bluetooth='BLE-MIDI device (firmware/lsdj_ble.c)',ram_text_bytes=sym('_dsp_end')-0x1c00000,
         sram_free=0x1c74000-sym('_cpu1_stacks_hi'))

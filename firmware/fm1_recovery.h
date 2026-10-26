@@ -11,7 +11,7 @@
 #ifdef CART_SLOT_CAPACITY
 #define FELUCCA_ID CART_SLOT_PRODUCT
 #else
-#define FELUCCA_ID "FM-1_969"   /* (967: the ROM-free template) */
+#define FELUCCA_ID "FM-1_971"
 #endif
 #define RING_PUBLISH() __asm__ volatile("csync" ::: "memory")
 /* The flash driver may also write the LSDj save pool (lsdj_state.h, 0x97000..0xE0000 =

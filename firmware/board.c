@@ -411,7 +411,8 @@ static void midi_in(uint32_t pkt,uint32_t at_ms,uint32_t src){
 static lsdj_ov_bars_t bars;
 static void fx_bars_fill(void){
     lsdj_fx_bars(&fx,&fxu,bars.hot,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
-    lsdj_fx_bar_choices(&fx,&fxu,bars.nchoice,bars.pick,bars.choice);   /* 2 or 3 choices: no bar */
+    lsdj_fx_bar_choices(&fx,&fxu,bars.nchoice,bars.pick,bars.choice);
+    bars.amount_scale=1;
     { unsigned t=lsdj_fx_eff(&fxu);bars.chan=(int8_t)(t<4u?(int)t:-1); }   /* frame the channel the effects act on */
 }
 static void fx_bars_show(int hot){
@@ -879,12 +880,14 @@ static void fm1_input_frame(void){
         if(b)tempo_apply(b);
         lsdj_tempo_bars(&tempo,sync_midi,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
         for(unsigned k=0;k<4u;k++)bars.nchoice[k]=0;
+        bars.amount_scale=0;
         bars.hot=-1;bars.chan=-1;lsdj_ov_bars_keep(&bars,fm1_ms);
     }
     if(cue.held){   /* ARP held: K1 / K2 choose the song row to cue, not effects */
         lsdj_cue_turn(&cue,(int)enc[2],(int)enc[3]);enc[2]=enc[3]=enc[4]=enc[5]=0;
         lsdj_cue_bars(&cue,gp_save_data()+songtab_off,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
         for(unsigned k=0;k<4u;k++)bars.nchoice[k]=0;
+        bars.amount_scale=0;
         bars.hot=-1;bars.chan=-1;lsdj_ov_bars_keep(&bars,fm1_ms);
     }
     {   /* KNOB 1-4 (encoders 2-5): the page's four effects */

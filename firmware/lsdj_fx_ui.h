@@ -106,10 +106,10 @@ static unsigned lsdj_fxk_choices(unsigned k) {
     }
     return 0;
 }
-/* Bar height 0..127. */
+/* Amount bars use the raw 00..7F setting, matching the value below the bar.
+   Hz, milliseconds and synced note names remain in the active-knob readout. */
 static unsigned lsdj_fxk_level(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, unsigned k) {
     unsigned v = lsdj_fxk_get(fx, u, k), n = lsdj_fxk_choices(k);
-    if (k == FXK_ECHO_TIME && fx->p.m[FXM_SYNC]) return lsdj_fx_note_of(v) * 127u / (LSDJ_FX_NOTES - 1u);
     return n ? v * 127u / (n - 1u) : v;
 }
 
@@ -156,21 +156,18 @@ static void lsdj_fxk_value(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, unsigned 
     }
 }
 
+static const char *lsdj_fxk_choice_short(unsigned k, unsigned i);
 /* The value in 2 characters, for its column under the bars (LSDj's channel data
    columns are 2 wide): 0..127 values, echo times and tones as their hex setting;
-   choices as LP / HP / BP, ON, MO / PP, and "--" for off. The full value is on the
-   line under the bars (lsdj_fx_bars). */
+   choices use the same names as their selectors. The full value is in the
+   active-knob readout (lsdj_fx_bars). */
 static void lsdj_fxk_value_short(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, unsigned k, char out[6]) {
     static const char hx[] = "0123456789ABCDEF";
     unsigned v = lsdj_fxk_get(fx, u, k);
     out[2] = 0;
-    switch (k) {
-    case FXK_TYPE: { static const char *const t[LSDJ_FX_FILTERS] = {"--", "LP", "HP", "BP", "NT", "L4"}; out[0] = t[v % LSDJ_FX_FILTERS][0]; out[1] = t[v % LSDJ_FX_FILTERS][1]; return; }
-    case FXK_DIST: { static const char *const t[LSDJ_FX_DISTS] = {"SO", "HA", "FO", "FZ"}; out[0] = t[v % LSDJ_FX_DISTS][0]; out[1] = t[v % LSDJ_FX_DISTS][1]; return; }
-    case FXK_LFO_SHAPE: { static const char *const t[LSDJ_FX_SHAPES] = {"SI", "TR", "SQ", "SW", "RN"}; out[0] = t[v % LSDJ_FX_SHAPES][0]; out[1] = t[v % LSDJ_FX_SHAPES][1]; return; }
-    case FXK_LFO_DEST: { static const char *const t[LSDJ_FX_DESTS] = {"CT", "VL", "PN"}; out[0] = t[v % LSDJ_FX_DESTS][0]; out[1] = t[v % LSDJ_FX_DESTS][1]; return; }
-    case FXK_FXON: case FXK_SYNC: case FXK_FREEZE: out[0] = v ? 'O' : '-'; out[1] = v ? 'N' : '-'; return;
-    case FXK_MODE: out[0] = v ? 'P' : 'M'; out[1] = v ? 'P' : 'O'; return;
+    if (lsdj_fxk_choices(k)) {
+        const char *s = lsdj_fxk_choice_short(k, v);
+        out[0] = s[0]; out[1] = s[1]; return;
     }
     out[0] = hx[(v >> 4) & 15u]; out[1] = hx[v & 15u];
 }
@@ -253,10 +250,17 @@ static void lsdj_fx_page_turn(lsdj_fx_ui_t *u, int steps) {
     u->page = (uint8_t)(p < 0 ? p + (int)LSDJ_FX_PAGES : p);
 }
 
-/* Knob effects with 2 or 3 choices: shown as their choices, not as a bar. */
+/* Discrete modes are choices, never amounts. Keep the same short names in the
+   selector and the value row. The active-knob readout gives the full name. */
 static const char *lsdj_fxk_choice_short(unsigned k, unsigned i) {
+    static const char *const filter[LSDJ_FX_FILTERS] = {"--", "LP", "HP", "BP", "NT", "L4"};
+    static const char *const dist[LSDJ_FX_DISTS] = {"SO", "HA", "FO", "FZ"};
+    static const char *const shape[LSDJ_FX_SHAPES] = {"SI", "TR", "SQ", "SW", "RN"};
     static const char *const dest[3] = {"CT", "VL", "PN"};
     switch (k) {
+    case FXK_TYPE: return filter[i % LSDJ_FX_FILTERS];
+    case FXK_DIST: return dist[i % LSDJ_FX_DISTS];
+    case FXK_LFO_SHAPE: return shape[i % LSDJ_FX_SHAPES];
     case FXK_FXON: case FXK_FREEZE: return i ? "ON" : "OF";
     case FXK_SYNC: return i ? "TP" : "FR";
     case FXK_MODE: return i ? "PP" : "MO";
@@ -264,12 +268,12 @@ static const char *lsdj_fxk_choice_short(unsigned k, unsigned i) {
     }
     return "";
 }
-static void lsdj_fx_bar_choices(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uint8_t nchoice[4], uint8_t pick[4], char choice[4][3][3]) {
+static void lsdj_fx_bar_choices(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uint8_t nchoice[4], uint8_t pick[4], char choice[4][6][3]) {
     unsigned pg = u->page % LSDJ_FX_PAGES;
     for (unsigned k = 0; k < 4; k++) {
         unsigned e = lsdj_fx_page_knob[pg][k], n = lsdj_fxk_choices(e);
         nchoice[k] = 0; pick[k] = 0;
-        if (n < 2u || n > 3u) continue;
+        if (n < 2u || n > 6u) continue;
         nchoice[k] = (uint8_t)n; pick[k] = (uint8_t)lsdj_fxk_get(fx, u, e);
         for (unsigned i = 0; i < n; i++) { const char *s = lsdj_fxk_choice_short(e, i); choice[k][i][0] = s[0]; choice[k][i][1] = s[1]; choice[k][i][2] = 0; }
     }

@@ -108,7 +108,7 @@ int main(int argc, char **argv) {
         assert(!strcmp(title, "ECHO 5/6"));              /* echo only: no channel */
         assert(!strcmp(label[0], "TM") && strlen(value[0]) == 2 && !strcmp(caption[0], "K1"));
         assert(!strcmp(value[3], "2C") && level[3] == 44);
-        assert(level[0] == 6u * 127u / 11u);
+        assert(level[0] == fx.p.m[FXM_TIME]);
         u.page = 0; lsdj_fx_bars(&fx, &u, -1, title, big, label, value, caption, level);
         assert(!strcmp(title, "FILTER WAV 1/6") && !strcmp(value[1], "LP") && !strcmp(label[1], "TY"));
         assert(!strcmp(big, "SELECT: PAGE"));
@@ -199,21 +199,45 @@ int main(int argc, char **argv) {
             fclose(f);
         }
     }
-    /* 2 or 3 choices: drawn as the choices, not a bar; everything else (and 4+ choices) a bar */
-    {   uint8_t nc[4], pick[4]; char ch[4][3][3];
+    /* Every discrete parameter is a choice list; amount scales are raw settings. */
+    {   uint8_t nc[4], pick[4]; char ch[4][6][3];
         lsdj_fx_t f; lsdj_fx_ui_t fu; lsdj_fx_init(&f, echo); lsdj_fx_ui_init(&fu); fu.cursor_ch = 1;
         f.p.q[1][FXQ_LFO_DEST] = 2; f.p.m[FXM_MODE] = 1; f.p.fx_off = 2; lsdj_fx_update(&f);
-        fu.page = 2; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);   /* LFO: rate, depth, shape (5) bars; LFO TO 3 */
-        assert(nc[0] == 0 && nc[1] == 0 && nc[2] == 0 && nc[3] == 3 && pick[3] == 2 && !strcmp(ch[3][0], "CT") && !strcmp(ch[3][2], "PN"));
+        fu.page = 2; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);
+        assert(nc[0] == 0 && nc[1] == 0 && nc[2] == 5 && nc[3] == 3 && pick[3] == 2 && !strcmp(ch[3][0], "CT") && !strcmp(ch[3][2], "PN"));
+        assert(!strcmp(ch[2][4], "RN"));
         fu.page = 3; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);   /* LO-FI: FX ON, off on PU2 */
         assert(nc[3] == 2 && pick[3] == 0 && !strcmp(ch[3][1], "ON"));
         fu.page = 5; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);   /* ECHO MORE: wobble bar; sync, mode, freeze */
         assert(nc[0] == 0 && nc[1] == 2 && nc[2] == 2 && pick[2] == 1 && !strcmp(ch[2][1], "PP") && nc[3] == 2);
-        fu.page = 0; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);   /* FILTER: the type has 6 choices: a bar */
-        assert(!nc[0] && !nc[1] && !nc[2] && !nc[3]);
+        fu.page = 0; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);
+        assert(!nc[0] && nc[1] == 6 && !nc[2] && !nc[3] && !strcmp(ch[1][5], "L4"));
+        fu.page = 1; f.p.q[1][FXQ_DIST] = 3; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);
+        assert(nc[1] == 4 && pick[1] == 3 && !strcmp(ch[1][3], "FZ"));
         for (unsigned p = 0; p < LSDJ_FX_PAGES; p++) { fu.page = (uint8_t)p; lsdj_fx_bar_choices(&f, &fu, nc, pick, ch);
-            for (int k = 0; k < 4; k++) for (unsigned i = 0; i < nc[k]; i++) fits(ch[k][i], 2); }
+            for (int k = 0; k < 4; k++) {
+                unsigned e = lsdj_fx_page_knob[p][k];
+                for (unsigned i = 0; i < nc[k]; i++) {
+                    fits(ch[k][i], 2);
+                    lsdj_fx_t chosen = f;
+                    if (lsdj_fxk_is_q(e)) chosen.p.q[1][lsdj_fxk_q(e)] = (uint8_t)i;
+                    else if (e == FXK_TYPE) chosen.p.ch[1][FXP_TYPE] = (uint8_t)i;
+                    else if (e == FXK_FXON) chosen.p.fx_off = i ? 0 : 2;
+                    else if (e == FXK_SYNC) chosen.p.m[FXM_SYNC] = (uint8_t)i;
+                    else if (e == FXK_MODE) chosen.p.m[FXM_MODE] = (uint8_t)i;
+                    else chosen.freeze = (uint8_t)i;
+                    char val[6]; lsdj_fxk_value_short(&chosen, &fu, e, val);
+                    assert(!strcmp(val, ch[k][i]));
+                }
+            }
+        }
+        for (unsigned v = 0; v < 128u; v++) {
+            f.p.m[FXM_TIME] = (uint8_t)v;
+            f.p.q[1][FXQ_LFO_RATE] = (uint8_t)v;
+            assert(lsdj_fxk_level(&f, &fu, FXK_ECHO_TIME) == v);
+            assert(lsdj_fxk_level(&f, &fu, FXK_LFO_RATE) == v);
+        }
     }
-    puts("PASS: effects controls: pages, SELECT turns pages, knobs per page, choices, bars text fits, shortcuts, save words, 2-3 choices as choices");
+    puts("PASS: effects controls: pages, knobs, shortcuts, save words, all 2-6 choices as selectors, raw amount scales");
     return 0;
 }

@@ -1,8 +1,9 @@
 """Build the public LSDj firmware template: GameDude for FM-1 with an EMPTY ROM slot.
 
 The sibling Burrito website writes each user's own LSDj into the slot locally.
-The generic experimental template has identity FM-1_967, independently of the
-normal alpha 66 build. This template contains no LSDj ROM.
+The generic experimental template has identity FM-1_972 and includes the alpha 71
+effects display and CPU1 save fixes. Normal ROM builds retain FM-1_971.
+This template contains no LSDj ROM.
 
 Run in WSL from the GameDude root, with the FM-1 toolchain and AC79 SDK:
   python3 tools/lsdj_template.py --toolchain /root/.jieli/toolchain --sdk /root/ac79-sdk

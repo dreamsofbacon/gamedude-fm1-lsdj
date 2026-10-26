@@ -63,55 +63,68 @@ static void lsdj_nat_clear(const lsdj_nat_t *n, unsigned col, unsigned row, unsi
     for (unsigned y = row * 8u; y < (row + h) * 8u && y < 144u; y++)
         for (unsigned x = col * 8u; x < (col + w) * 8u && x < LSDJ_NAT_W; x++) n->px[y * LSDJ_NAT_W + x] = c;
 }
-/* A light tint of the accent (about a fifth) over pixels x0..x1, y0..y1. */
-static void lsdj_nat_tint(const lsdj_nat_t *n, unsigned x0, unsigned y0, unsigned x1, unsigned y1, uint16_t accent) {
-    int ar = accent >> 11, ag = (accent >> 5) & 63, ab = accent & 31;
-    for (unsigned y = y0; y < y1 && y < 144u; y++)
-        for (unsigned x = x0; x < x1 && x < LSDJ_NAT_W; x++) {
-            uint16_t c = n->px[y * LSDJ_NAT_W + x];
-            int r = c >> 11, g = (c >> 5) & 63, bl = c & 31;
-            r += (ar - r) / 5; g += (ag - g) / 5; bl += (ab - bl) / 5;
-            n->px[y * LSDJ_NAT_W + x] = (uint16_t)(r << 11 | g << 5 | bl);
-        }
-}
-
 /* ---------- the effects / cue / tempo panel: in the song table's format ----------
    It covers the song area (columns 0..14) down to row 15 and is laid out like a
    mixer, knob k in channel k's 2-wide data column (column 3+3k): row 0 the
    title, row 1 the turned knob ("K1 DRIVE 08") or the hint as a value field
-   across the panel, rows 2..13 a bar of song-cell blocks filled from the bottom
-   (filled: LSDj's value-field block, empty: "--" as an empty song cell) in
-   LSDj's own groups of four rows (song rows 00-03, 04-07, 08-0B), a gap between
-   them; row 15 its value. A knob with 2 or 3 choices has no bar: its choices,
-   one per group of four rows, lowest at the bottom, the one set as a filled
-   group with its name in it. Rows 16..17 are the knob names (lsdj_nat_names), drawn with the
-   panel (board.c native_draw). The effect channel's column is
-   tinted. LSDj's right panel stays. */
+   across the panel, rows 2..13 the controls; row 15 their values.
+   Effects amounts have eight segments of 0x10 raw settings, partial fill and
+   a hex ruler. Discrete modes have named choices, lowest at the bottom, with
+   only the selected choice inverted. Cue/tempo keep their song-cell bars.
+   Rows 16..17 are the knob names (lsdj_nat_names), drawn with the
+   panel (board.c native_draw). Channel identity stays in the text, not a
+   column tint. LSDj's right panel stays. */
 #define LSDJ_NAT_BAR_TOP 2u
 #define LSDJ_NAT_QUAD 4u        /* LSDj's rows come in groups of four */
 #define LSDJ_NAT_BAR_CELLS 12u  /* three groups: rows 2..13 = song rows 00..0B */
 #define LSDJ_NAT_PANEL 15u   /* columns 0..14: LSDj's right panel and screen map (15..19) stay */
 #define LSDJ_NAT_VALUE_ROW 15u
 #define LSDJ_NAT_NAME_ROW 16u   /* rows 16..17 */
+#define LSDJ_NAT_AMOUNT_STEPS 8u
+#define LSDJ_NAT_AMOUNT_HEIGHT 12u  /* 96 pixels / eight 0x10 steps */
+static unsigned lsdj_nat_amount_fill(unsigned value, unsigned step) {
+    if (value > 127u) value = 127u;
+    unsigned base = step * 16u, part = value > base ? value - base : 0u;
+    if (part > 16u) part = 16u;
+    return (part * (LSDJ_NAT_AMOUNT_HEIGHT - 1u) + 15u) / 16u;
+}
+static void lsdj_nat_amount(const lsdj_nat_t *n, unsigned col, unsigned value, uint16_t accent) {
+    uint16_t bg = lsdj_nat_col(n, 0), ink = lsdj_nat_col(n, 3);
+    for (unsigned step = 0; step < LSDJ_NAT_AMOUNT_STEPS; step++) {
+        unsigned top = LSDJ_NAT_BAR_TOP * 8u + (LSDJ_NAT_AMOUNT_STEPS - 1u - step) * LSDJ_NAT_AMOUNT_HEIGHT;
+        unsigned fill = lsdj_nat_amount_fill(value, step);
+        for (unsigned y = 0; y < LSDJ_NAT_AMOUNT_HEIGHT; y++) {
+            uint16_t color = y >= LSDJ_NAT_AMOUNT_HEIGHT - fill ? accent : bg;
+            for (unsigned x = 0; x < 16u; x++) n->px[(top + y) * LSDJ_NAT_W + col * 8u + x] = color;
+        }
+        if (!fill) {
+            for (unsigned x = 2; x < 6u; x++) n->px[(top + 6u) * LSDJ_NAT_W + col * 8u + x] = ink;
+            for (unsigned x = 10; x < 14u; x++) n->px[(top + 6u) * LSDJ_NAT_W + col * 8u + x] = ink;
+        }
+    }
+}
 static void lsdj_nat_bars(const lsdj_nat_t *n, const lsdj_ov_bars_t *b, uint16_t accent) {
     lsdj_nat_clear(n, 0, 0, LSDJ_NAT_PANEL, LSDJ_NAT_NAME_ROW);
     lsdj_nat_text(n, 0, 0, b->title, LSDJ_NAT_PANEL, 0);
     lsdj_nat_text(n, 0, 1, "               ", LSDJ_NAT_PANEL, 1);
     lsdj_nat_text(n, 0, 1, b->big, LSDJ_NAT_PANEL, 1);
+    if (b->amount_scale) {
+        static const char *const ticks[5] = {"7F", "60", "40", "20", "00"};
+        for (unsigned i = 0; i < 5u; i++) lsdj_nat_text(n, 0, LSDJ_NAT_BAR_TOP + i * 3u, ticks[i], 2, 0);
+    }
     for (unsigned k = 0; k < 4u; k++) {
         if (!b->label[k][0]) continue;
         unsigned c = 3u + 3u * k, hot = (int)k == b->hot;
         lsdj_nat_text(n, c, LSDJ_NAT_VALUE_ROW, b->value[k], 2, (int)hot);
-        if (b->nchoice[k] >= 2u && b->nchoice[k] <= 3u) {   /* the choices, one per group */
+        if (b->nchoice[k] >= 2u && b->nchoice[k] <= 6u) {
+            unsigned rows = b->nchoice[k] <= 3u ? LSDJ_NAT_QUAD : 2u;
             for (unsigned i = 0; i < b->nchoice[k]; i++) {
-                unsigned top = LSDJ_NAT_BAR_TOP + (LSDJ_NAT_BAR_CELLS / LSDJ_NAT_QUAD - 1u - i) * LSDJ_NAT_QUAD;
-                if (i == b->pick[k]) {
-                    for (unsigned r = 0; r < LSDJ_NAT_QUAD; r++) lsdj_nat_text(n, c, top + r, "  ", 2, 1);
-                    lsdj_nat_text(n, c, top + 1u, b->choice[k][i], 2, 1);
-                } else lsdj_nat_text(n, c, top + 1u, b->choice[k][i], 2, 0);
+                unsigned top = LSDJ_NAT_BAR_TOP + LSDJ_NAT_BAR_CELLS - (i + 1u) * rows;
+                lsdj_nat_text(n, c, top + (rows - 1u) / 2u, b->choice[k][i], 2, i == b->pick[k]);
             }
             continue;
         }
+        if (b->amount_scale) { lsdj_nat_amount(n, c, b->level[k], accent); continue; }
         unsigned lv = b->level[k] > 127u ? 127u : b->level[k];
         unsigned fill = (lv * LSDJ_NAT_BAR_CELLS + 63u) / 127u;
         if (lv && !fill) fill = 1u;
@@ -120,7 +133,7 @@ static void lsdj_nat_bars(const lsdj_nat_t *n, const lsdj_ov_bars_t *b, uint16_t
             lsdj_nat_text(n, c, row, i < fill ? "  " : "--", 2, i < fill);
         }
     }
-    {   /* the groups: a 2-pixel gap in the background colour between them, across the columns */
+    if (!b->amount_scale) {   /* cue/tempo retain the song-row grouping */
         uint16_t bg = lsdj_nat_col(n, 0);
         for (unsigned g = 1; g < LSDJ_NAT_BAR_CELLS / LSDJ_NAT_QUAD; g++) {
             unsigned y = (LSDJ_NAT_BAR_TOP + g * LSDJ_NAT_QUAD) * 8u;
@@ -132,8 +145,6 @@ static void lsdj_nat_bars(const lsdj_nat_t *n, const lsdj_ov_bars_t *b, uint16_t
             }
         }
     }
-    if (b->chan >= 0 && b->chan < 4)
-        lsdj_nat_tint(n, (2u + 3u * (unsigned)b->chan) * 8u, LSDJ_NAT_BAR_TOP * 8u, (5u + 3u * (unsigned)b->chan) * 8u, LSDJ_NAT_NAME_ROW * 8u, accent);
 }
 
 /* ---------- the knobs' names, with the panel (LSDj's bottom two rows) ----------

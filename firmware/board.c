@@ -11,6 +11,7 @@
 #ifdef CART_SLOT_CAPACITY
 #include "lsdj_slot.h"
 static lsdj_slot_t cart_slot;
+static uint8_t cart_slot_valid;
 #endif
 #include "boot_brand.h"
 extern void gb_isr_audio(void),gb_isr_scan(void);
@@ -781,9 +782,18 @@ static void lk_live(lsdj_link_live_t *l){
 #endif
 static uint32_t lk_midi_get(void){return lsdj_midi_pack(&midi);}
 static int lk_midi_set(uint32_t v){lsdj_midi_t t;if(!lsdj_midi_unpack(v,&t))return 0;midi=t;return 1;}
+static const volatile uint8_t *lk_cartridge(uint32_t *len){
+#ifdef CART_SLOT_CAPACITY
+    *len=LSDJ_SLOT_HDR+cart_slot.stored_banks*LSDJ_SLOT_BANK;
+    if(cart_slot_valid&&cart_slot.stored_banks&&*len<=CART_SLOT_CAPACITY)return cartridge;
+#else
+    (void)len;
+#endif
+    return 0;
+}
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,
-    lk_midi_get,lk_midi_set};
+    lk_midi_get,lk_midi_set,lk_cartridge};
 static int app_sysex_frame(const uint8_t *frame,uint32_t size){
     if(!lsdj_link_match(frame,size))return 0;
     static uint8_t reply[LSDJ_LINK_REPLY_MAX];
@@ -1016,6 +1026,7 @@ void gb_cstart(const uint32_t *parameters){
     const volatile uint8_t *cart_header=cartridge;
 #if defined(CART_SLOT_CAPACITY)
     int slot_error=lsdj_slot_parse(cart_header,CART_SLOT_CAPACITY,&cart_slot);
+    cart_slot_valid=(uint8_t)(slot_error==LSDJ_SLOT_OK);
     if(!slot_error)gp_set_bank_map(cart_slot.bank_map,cart_slot.logical_banks);
     if(slot_error||gp_load(cartridge+LSDJ_SLOT_HDR,cart_slot.logical_banks*LSDJ_SLOT_BANK)){
 #elif defined(CART_SPARSE_BANKS)

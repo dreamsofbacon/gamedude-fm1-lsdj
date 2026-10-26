@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* The web page's link to the running firmware, over USB-MIDI SysEx. Nothing here
-   writes firmware: songs, settings, effects and themes only, each stored by the
+   writes firmware: songs, settings, effects and themes are stored by the
    firmware's own save store (firmware/lsdj_ftl.h).
 
    Request  F0 7D 'G' 'S' op [data] F7
@@ -36,6 +36,12 @@
                              packets in / out, SysEx in, bad packets, MTU payload, heap
                              high-water, heap refusals, longest task run, start stage,
                              fatal, dropped out); status 1 in a build without Bluetooth
+   op 0x22 CART_INFO      -> u32 slot length, u32 header CRC, u32 data CRC;
+                             status 1 if this build cannot export a validated slot
+   op 0x23 CART_READ u32 off -> u32 off, up to 120 slot bytes (last chunk shorter);
+                             off must be a multiple of 120, strictly within the slot
+   Cartridge export reads immutable application data only; never saves, arbitrary
+   addresses, flash writes or pauses. Both operations refuse during save import.
    status 0 ok, 1 bad request, 2 wrong state, 3 crc mismatch, 4 flash error.
    An import with no CHUNK / COMMIT for LSDJ_LINK_TIMEOUT_MS is aborted.
    Pure logic, the hardware through lsdj_link_io_t: tests/lsdj_link.c. */
@@ -44,6 +50,7 @@
 
 #define LSDJ_LINK_PROTOCOL   1u
 #define LSDJ_LINK_CHUNK      128u
+#define LSDJ_LINK_CART_CHUNK 120u
 #define LSDJ_LINK_TIMEOUT_MS 5000u
 #define LSDJ_LINK_FX_WORDS   17u   /* firmware/lsdj_fx_ui.h; 11 before alpha 66 (FX_SET takes both) */
 #define LSDJ_LINK_FX_WORDS_OLD 11u
@@ -52,7 +59,7 @@
 enum { LSDJ_LINK_INFO = 0x01, LSDJ_LINK_READ, LSDJ_LINK_BEGIN, LSDJ_LINK_CHUNK_OP, LSDJ_LINK_COMMIT, LSDJ_LINK_ABORT,
        LSDJ_LINK_SETTINGS_GET = 0x10, LSDJ_LINK_SETTINGS_SET, LSDJ_LINK_FX_GET, LSDJ_LINK_FX_SET,
        LSDJ_LINK_THEME_GET, LSDJ_LINK_THEME_SET, LSDJ_LINK_STORE, LSDJ_LINK_MIDI_GET, LSDJ_LINK_MIDI_SET,
-       LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT };
+       LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ };
 #define LSDJ_LINK_BT_STATS 13u
 enum { LSDJ_LINK_OK = 0, LSDJ_LINK_BAD = 1, LSDJ_LINK_STATE = 2, LSDJ_LINK_CRC = 3, LSDJ_LINK_FLASH = 4 };
 
@@ -85,6 +92,7 @@ typedef struct {
     uint32_t (*bt_stat)(unsigned i);             /* 0 in a build without Bluetooth */
     uint32_t (*midi_get)(void);                  /* the MIDI options; 0 = none (status 1) */
     int (*midi_set)(uint32_t v);
+    const volatile uint8_t *(*cartridge)(uint32_t *len); /* validated immutable slot, or NULL */
 } lsdj_link_io_t;
 
 typedef struct {
@@ -141,6 +149,28 @@ static uint32_t lsdj_link_handle(lsdj_link_t *s, const lsdj_link_io_t *io, const
     uint32_t n = 0;
     r[n++] = 0xf0; r[n++] = 0x7d; r[n++] = 'G'; r[n++] = 'S'; r[n++] = op; r[n++] = 0;
     switch (op) {
+    case LSDJ_LINK_CART_INFO:
+    case LSDJ_LINK_CART_READ: {
+        uint32_t len = 0;
+        const volatile uint8_t *cart = io->cartridge ? io->cartridge(&len) : 0;
+        if (!cart || len < 256u || len > 256u + 128u * 16384u) { status = LSDJ_LINK_BAD; break; }
+        if (s->importing) { status = LSDJ_LINK_STATE; break; }
+        if (op == LSDJ_LINK_CART_INFO) {
+            if (an) { status = LSDJ_LINK_BAD; break; }
+            n = lsdj_link_put32(r, n, len);
+            for (unsigned i = 252; i < 256; i++) n = lsdj_link_put8(r, n, cart[i]);
+            for (unsigned i = 16; i < 20; i++) n = lsdj_link_put8(r, n, cart[i]);
+        } else {
+            if (!lsdj_link_unpack(args, an, d, 4)) { status = LSDJ_LINK_BAD; break; }
+            uint32_t off = lsdj_link_le32(d);
+            if (off % LSDJ_LINK_CART_CHUNK || off >= len) { status = LSDJ_LINK_BAD; break; }
+            uint32_t count = len - off;
+            if (count > LSDJ_LINK_CART_CHUNK) count = LSDJ_LINK_CART_CHUNK;
+            n = lsdj_link_put32(r, n, off);
+            for (uint32_t i = 0; i < count; i++) n = lsdj_link_put8(r, n, cart[off + i]);
+        }
+        break;
+    }
     case LSDJ_LINK_INFO:
         if (an) { status = LSDJ_LINK_BAD; break; }
         n = lsdj_link_put8(r, n, LSDJ_LINK_PROTOCOL);

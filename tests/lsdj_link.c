@@ -36,8 +36,11 @@ static void io_live(lsdj_link_live_t *l) { l->page = 2; l->cursor_ch = 3; l->bpm
 static uint32_t midi_word = 0x4D000009u;
 static uint32_t io_mget(void) { return midi_word; }
 static int io_mset(uint32_t v) { if (v >> 24 != 0x4D) return 0; midi_word = v; return 1; }
+static uint8_t cartridge[256 + 2 * 16384];
+static int cart_available = 1;
+static const volatile uint8_t *io_cart(uint32_t *len) { *len = sizeof cartridge; return cart_available ? cartridge : 0; }
 static const lsdj_link_io_t io = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
-                                  io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset};
+                                  io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart};
 static lsdj_link_t st;
 static uint8_t reply[LSDJ_LINK_REPLY_MAX];
 static uint32_t rn;
@@ -65,6 +68,33 @@ int main(void) {
     static uint8_t song[SIZE], other[SIZE], got[SIZE];
     for (uint32_t i = 0; i < SIZE; i++) { song[i] = (uint8_t)(i * 31 + 7); other[i] = (uint8_t)(i ^ 0xa5); }
     memcpy(ram, song, SIZE); memcpy(flash, song, SIZE);
+    for (unsigned i = 0; i < sizeof cartridge; i++) cartridge[i] = (uint8_t)(i * 19u);
+    assert(req(LSDJ_LINK_CART_INFO, 0, 0, 0) == LSDJ_LINK_OK);
+    assert(rd32(0) == sizeof cartridge && rd32(4) == lsdj_link_le32(cartridge + 252) && rd32(8) == lsdj_link_le32(cartridge + 16));
+    for (uint32_t off = 0; off < sizeof cartridge; off += LSDJ_LINK_CART_CHUNK) {
+        uint8_t b[4]; le32(b, off);
+        for (unsigned retry = 0; retry < 2; retry++) {
+            assert(req(LSDJ_LINK_CART_READ, b, 4, 0) == LSDJ_LINK_OK && rd32(0) == off);
+            unsigned count = sizeof cartridge - off;
+            if (count > LSDJ_LINK_CART_CHUNK) count = LSDJ_LINK_CART_CHUNK;
+            assert(rn == 7 + 2 * (count + 4));
+            for (unsigned i = 0; i < count; i++) assert(rd(4 + i) == cartridge[off + i]);
+        }
+    }
+    { uint8_t b[4];
+      const uint32_t bad[] = {1, sizeof cartridge, 0xffffffb0u, 0xffffffffu};
+      for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+          le32(b, bad[i]); assert(req(LSDJ_LINK_CART_READ, b, 4, 0) == LSDJ_LINK_BAD);
+      }
+      assert(req(LSDJ_LINK_CART_READ, b, 3, 0) == LSDJ_LINK_BAD);
+      assert(req(LSDJ_LINK_CART_INFO, b, 1, 0) == LSDJ_LINK_BAD);
+      cart_available = 0;
+      assert(req(LSDJ_LINK_CART_INFO, 0, 0, 0) == LSDJ_LINK_BAD);
+      assert(req(LSDJ_LINK_CART_READ, b, 4, 0) == LSDJ_LINK_BAD);
+      cart_available = 1;
+    }
+    assert(!paused && !resets && !stores && !config_stores);
+    assert(!memcmp(ram, song, SIZE) && !memcmp(flash, song, SIZE));
 
     /* INFO */
     assert(req(LSDJ_LINK_INFO, 0, 0, 0) == LSDJ_LINK_OK);
@@ -84,6 +114,8 @@ int main(void) {
     /* Import: stored first, chunks in order, commit restarts LSDj */
     assert(begin(SIZE, lsdj_link_crc32(other, SIZE), 0) == LSDJ_LINK_OK && paused && stores == 1);
     assert(req(LSDJ_LINK_READ, (const uint8_t[4]){0}, 4, 0) == LSDJ_LINK_STATE);
+    assert(req(LSDJ_LINK_CART_INFO, 0, 0, 0) == LSDJ_LINK_STATE);
+    assert(req(LSDJ_LINK_CART_READ, (const uint8_t[4]){0}, 4, 0) == LSDJ_LINK_STATE);
     assert(chunk(other, 256, 1) == LSDJ_LINK_BAD);                       /* out of order */
     for (uint32_t off = 0; off < SIZE; off += LSDJ_LINK_CHUNK) assert(chunk(other, off, 2) == LSDJ_LINK_OK);
     assert(chunk(other, SIZE - LSDJ_LINK_CHUNK, 3) == LSDJ_LINK_OK);      /* the last one again */

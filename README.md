@@ -1,4 +1,25 @@
+# Dreamy_bacon's LSDJ Burrito
+
+LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
+
+- **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
+- **Status:** alpha (FM-1_976). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
+
+Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
+
+---
+
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: SEQ and the other LSDj helpers in web builds (FM-1_976)
+
+Web-installed (generic template) builds used only the cursor address from the
+verified LSDj 9.3.9 profile, so SEQ (live / song mode), EDIT tempo, ARP song
+cues, MIDI clock / KEYBD sync and the PLAY beat light did nothing. The profile
+is set by the browser only when the program banks' SHA-256 matches the verified
+9.3.9 program, and every one of these addresses belongs to that program, so
+FM-1_976 enables all of them for profile 1. Unknown programs still get none.
 
 ## LSDj Burrito: master FX controls (FM-1_975)
 
@@ -66,9 +87,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_975 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_976 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_975 for alpha 75).
+Normal ROM builds use the current alpha identity (FM-1_976 for alpha 76).
 
 From this repository in WSL:
 

@@ -341,22 +341,27 @@ static uint16_t cursor_addr,tempo_addr,sync_off,armed_addr,row_addr,live_addr,so
 #define LSDJ_SYNC_LSDJ 1u
 #define LSDJ_SYNC_KEYBD 5u
 static void cursor_detect(void){
-#ifdef CART_SLOT_CAPACITY
-    /* The browser selects this read-only profile by program SHA-256, not title.
-       Other version-specific helpers remain disabled in generic builds. */
-    cursor_addr=cart_slot.cursor_addr;
-    return;
-#endif
     /* row: 4 phrase rows (0..15, one per channel), live: 1 in live mode, songrow: 4 song
        rows, chainpos: 4 places in the chain, songtab: the song table in cartridge RAM
        (harness/lsdj_drive.c rec / peek / sdump, find_chainpos.py) */
     /* period: the tempo period (16 bits), songtempo: the song's tempo in cartridge RAM */
     static const struct {const char *title;uint16_t cursor,tempo,sync,armed,row,live,songrow,chainpos,songtab,period,songtempo,screen;} known[]={
         {"LSDj-v9.3.9",0xC41D,0xC529,0x3FBD,0xC0E0,0xC16C,0xC528,0xC200,0xC17C,0x1290,0xC954,0x3FB4,0xC401}};
+#ifdef CART_SLOT_CAPACITY
+    /* Generic builds: the browser marks the slot with profile 1 only when the program
+       banks' SHA-256 matches the verified LSDj 9.3.9 program (lsdj_slot.h byte 148), never
+       by title. Every address below comes from that program, so all of them apply;
+       unknown programs keep every helper off. */
+    const int verified=cart_slot.cursor_addr==known[0].cursor;
+#endif
     const char *t=gp_title();
     for(unsigned i=0;i<sizeof known/sizeof known[0];i++){
         unsigned k=0;while(known[i].title[k]&&t[k]==known[i].title[k])k++;
+#ifdef CART_SLOT_CAPACITY
+        if(i==0&&verified){
+#else
         if(!known[i].title[k]&&!t[k]){
+#endif
             cursor_addr=known[i].cursor;tempo_addr=known[i].tempo;sync_off=known[i].sync;armed_addr=known[i].armed;
             row_addr=known[i].row;live_addr=known[i].live;
             songrow_addr=known[i].songrow;chainpos_addr=known[i].chainpos;songtab_off=known[i].songtab;

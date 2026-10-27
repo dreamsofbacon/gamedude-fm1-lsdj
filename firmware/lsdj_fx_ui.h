@@ -2,8 +2,8 @@
 /* Effects controls. KNOB 1-4 always play the four effects of the current page;
    the SELECT knob turns the pages. Each change pops up four bars (one per knob,
    lined up under LSDj's four channel columns: firmware/lsdj_overlay.h).
-   Tapping FX / SELECT shows the channel pages (FILTER, DRIVE, LFO, LO-FI); holding FX
-   shows the master pages (MASTER, ECHO, ECHO MOD: shared by every channel), with a
+   Tapping FX / SELECT shows the channel pages (FILTER, DRIVE, LFO, LO-FI, ECHO, ECHO MOD:
+   the echo is shared, each channel sends to it); holding FX shows MASTER, with a
    channel strip: C4-F4 mute PU1 PU2 WAV NOI.
    Per-channel effects act on the target: the channel under LSDj's cursor by
    default. Packs the setup into 17 32-bit words for the save store (11 before
@@ -59,17 +59,18 @@ static const char *const lsdj_fx_dest_name[LSDJ_FX_DESTS] = {"CUT", "VOL", "PAN"
 typedef struct {
     uint8_t target;          /* 0..3 one channel, LSDJ_FX_ALL, LSDJ_FX_CURSOR */
     uint8_t cursor_ch;       /* board: LSDj's cursor channel 0..3, else (unknown) 0xFF */
-    uint8_t page;            /* the channel page shown (FX_PAGE_FILTER..FX_PAGE_LOFI) */
-    uint8_t mpage;           /* the master page (FX_PAGE_MASTER, _ECHO, _ECHO_MOD) */
+    uint8_t page;            /* the channel page shown (FX_PAGE_FILTER..FX_PAGE_ECHO_MOD) */
+    uint8_t mpage;           /* the master page (FX_PAGE_MASTER) */
     uint8_t held;            /* FX held: the master pages are on the knobs */
 } lsdj_fx_ui_t;
 
 static void lsdj_fx_ui_init(lsdj_fx_ui_t *u) { u->target = LSDJ_FX_CURSOR; u->cursor_ch = 0xFF; u->page = FX_PAGE_FILTER; u->mpage = FX_PAGE_MASTER; u->held = 0; }
 /* The two groups of pages, in SELECT order: channel pages, master pages. */
-static const uint8_t lsdj_fx_group[2][4] = {{FX_PAGE_FILTER, FX_PAGE_DRIVE, FX_PAGE_LFO, FX_PAGE_LOFI}, {FX_PAGE_MASTER, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD, FX_PAGE_MASTER}};
-static const uint8_t lsdj_fx_group_n[2] = {4, 3};
-static const char *const lsdj_fx_group_letters[2] = {"1234", "123"};   /* the screen map */
-static int lsdj_fx_is_master(unsigned p) { return p == FX_PAGE_MASTER || p >= FX_PAGE_ECHO; }
+static const uint8_t lsdj_fx_group[2][6] = {{FX_PAGE_FILTER, FX_PAGE_DRIVE, FX_PAGE_LFO, FX_PAGE_LOFI, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD},
+                                           {FX_PAGE_MASTER}};
+static const uint8_t lsdj_fx_group_n[2] = {6, 1};
+static const char *const lsdj_fx_group_letters[2] = {"123456", "1"};   /* the screen map */
+static int lsdj_fx_is_master(unsigned p) { return p == FX_PAGE_MASTER; }
 /* The page on the knobs: the master page while FX is held. */
 static unsigned lsdj_fx_cur(const lsdj_fx_ui_t *u) { return (u->held ? u->mpage : u->page) % LSDJ_FX_PAGES; }
 /* Its place in its group (0..). */

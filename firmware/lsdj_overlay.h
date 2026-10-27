@@ -250,6 +250,7 @@ typedef struct {
     uint8_t nchoice[4], pick[4];
     char choice[4][6][3];
     uint8_t amount_scale;    /* effects: eight 0x10 steps, with a shared raw-setting ruler */
+    uint8_t strip;           /* hold FX: 0x80 | the muted channels (bit per channel); 0 none */
     uint32_t until_ms;
 } lsdj_ov_bars_t;
 

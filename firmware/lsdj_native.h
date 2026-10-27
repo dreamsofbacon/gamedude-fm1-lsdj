@@ -78,6 +78,7 @@ static void lsdj_nat_clear(const lsdj_nat_t *n, unsigned col, unsigned row, unsi
 #define LSDJ_NAT_QUAD 4u        /* LSDj's rows come in groups of four */
 #define LSDJ_NAT_BAR_CELLS 12u  /* three groups: rows 2..13 = song rows 00..0B */
 #define LSDJ_NAT_PANEL 15u   /* columns 0..14: LSDj's right panel and screen map (15..19) stay */
+#define LSDJ_NAT_STRIP_ROW 14u   /* hold FX: the channel strip */
 #define LSDJ_NAT_VALUE_ROW 15u
 #define LSDJ_NAT_NAME_ROW 16u   /* rows 16..17 */
 #define LSDJ_NAT_AMOUNT_STEPS 8u
@@ -132,6 +133,10 @@ static void lsdj_nat_bars(const lsdj_nat_t *n, const lsdj_ov_bars_t *b, uint16_t
             unsigned row = LSDJ_NAT_BAR_TOP + LSDJ_NAT_BAR_CELLS - 1u - i;
             lsdj_nat_text(n, c, row, i < fill ? "  " : "--", 2, i < fill);
         }
+    }
+    if (b->strip) {   /* hold FX: the channels on row 14, playing ones as value fields (lit) */
+        static const char *const ch[4] = {"PU1", "PU2", "WAV", "NOI"};
+        for (unsigned c = 0; c < 4u; c++) lsdj_nat_text(n, 4u * c, LSDJ_NAT_STRIP_ROW, ch[c], 3, !((b->strip >> c) & 1u));
     }
     if (!b->amount_scale) {   /* cue/tempo retain the song-row grouping */
         uint16_t bg = lsdj_nat_col(n, 0);

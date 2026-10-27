@@ -40,6 +40,7 @@
                              status 1 if this build cannot export a validated slot
    op 0x23 CART_READ u32 off -> u32 off, up to 120 slot bytes (last chunk shorter);
                              off must be a multiple of 120, strictly within the slot
+   op 0x24 MUTE_SET u8 mute (bit per channel), u8 freeze (0/1)   live only, never saved
    Cartridge export reads immutable application data only; never saves, arbitrary
    addresses, flash writes or pauses. Both operations refuse during save import.
    status 0 ok, 1 bad request, 2 wrong state, 3 crc mismatch, 4 flash error.
@@ -59,7 +60,7 @@
 enum { LSDJ_LINK_INFO = 0x01, LSDJ_LINK_READ, LSDJ_LINK_BEGIN, LSDJ_LINK_CHUNK_OP, LSDJ_LINK_COMMIT, LSDJ_LINK_ABORT,
        LSDJ_LINK_SETTINGS_GET = 0x10, LSDJ_LINK_SETTINGS_SET, LSDJ_LINK_FX_GET, LSDJ_LINK_FX_SET,
        LSDJ_LINK_THEME_GET, LSDJ_LINK_THEME_SET, LSDJ_LINK_STORE, LSDJ_LINK_MIDI_GET, LSDJ_LINK_MIDI_SET,
-       LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ };
+       LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ, LSDJ_LINK_MUTE_SET };
 #define LSDJ_LINK_BT_STATS 13u
 enum { LSDJ_LINK_OK = 0, LSDJ_LINK_BAD = 1, LSDJ_LINK_STATE = 2, LSDJ_LINK_CRC = 3, LSDJ_LINK_FLASH = 4 };
 
@@ -93,6 +94,7 @@ typedef struct {
     uint32_t (*midi_get)(void);                  /* the MIDI options; 0 = none (status 1) */
     int (*midi_set)(uint32_t v);
     const volatile uint8_t *(*cartridge)(uint32_t *len); /* validated immutable slot, or NULL */
+    int (*mute_set)(uint8_t mute, uint8_t freeze);   /* 0 if not valid; NULL: not supported (status 1) */
 } lsdj_link_io_t;
 
 typedef struct {
@@ -272,6 +274,9 @@ static uint32_t lsdj_link_handle(lsdj_link_t *s, const lsdj_link_io_t *io, const
         break;
     case LSDJ_LINK_MIDI_SET:
         if (!io->midi_set || !lsdj_link_unpack(args, an, d, 4) || !io->midi_set(lsdj_link_le32(d))) status = LSDJ_LINK_BAD;
+        break;
+    case LSDJ_LINK_MUTE_SET:
+        if (!io->mute_set || !lsdj_link_unpack(args, an, d, 2) || !io->mute_set(d[0], d[1])) status = LSDJ_LINK_BAD;
         break;
     case LSDJ_LINK_BT:
         if (an || !io->bt_stat) { status = LSDJ_LINK_BAD; break; }

@@ -27,7 +27,7 @@ static void check_bars(void) {
 
 int main(int argc, char **argv) {
     lsdj_fx_init(&fx, echo); lsdj_fx_ui_init(&u); lsdj_fx_update(&fx);
-    assert(!fx.active && u.target == LSDJ_FX_CURSOR && u.page == 0);
+    assert(!fx.active && u.target == LSDJ_FX_CURSOR && u.page == FX_PAGE_FILTER && u.mpage == FX_PAGE_MASTER && !u.held);
     /* Every effect once; unused knobs are blank and inert. */
     { int seen[FXK_COUNT] = {0};
       for (unsigned p = 0; p < LSDJ_FX_PAGES; p++) for (unsigned k = 0; k < 4; k++) {
@@ -72,12 +72,24 @@ int main(int argc, char **argv) {
     turn(2, 200); assert(fx.p.ch[2][FXP_CUTOFF] == 127); turn(2, -300); assert(fx.p.ch[2][FXP_CUTOFF] == 0);
     check_bars();
 
-    /* SELECT knob: pages wrap both ways. */
-    u.page = 0;
-    lsdj_fx_page_turn(&u, 1); assert(u.page == 1);
-    lsdj_fx_page_turn(&u, -2); assert(u.page == LSDJ_FX_PAGES - 1);
-    lsdj_fx_page_turn(&u, 1); assert(u.page == 0);
-    lsdj_fx_page_turn(&u, LSDJ_FX_PAGES + 2); assert(u.page == 2);
+    /* SELECT knob: the channel pages wrap both ways; with FX held, the master pages. */
+    u.page = FX_PAGE_FILTER;
+    lsdj_fx_page_turn(&u, 1); assert(u.page == FX_PAGE_DRIVE);
+    lsdj_fx_page_turn(&u, -2); assert(u.page == FX_PAGE_LOFI);
+    lsdj_fx_page_turn(&u, 1); assert(u.page == FX_PAGE_FILTER);
+    lsdj_fx_page_turn(&u, 4 + 2); assert(u.page == FX_PAGE_LFO && u.mpage == FX_PAGE_MASTER);
+    u.held = 1;
+    assert(lsdj_fx_cur(&u) == FX_PAGE_MASTER && lsdj_fx_pos(&u) == 0);
+    lsdj_fx_page_turn(&u, 1); assert(u.mpage == FX_PAGE_ECHO && u.page == FX_PAGE_LFO && lsdj_fx_cur(&u) == FX_PAGE_ECHO);
+    lsdj_fx_page_turn(&u, -2); assert(u.mpage == FX_PAGE_ECHO_MOD && lsdj_fx_pos(&u) == 2);
+    lsdj_fx_page_turn(&u, 1); assert(u.mpage == FX_PAGE_MASTER);
+    { char title[20], big[20], label[4][7], value[4][6], caption[4][4]; uint8_t level[4];
+      lsdj_fx_bars(&fx, &u, -1, title, big, label, value, caption, level);
+      assert(!strcmp(title, "MASTER 1/3") && !strcmp(big, "C4-F4: MUTE")); }
+    u.held = 0; u.page = FX_PAGE_FILTER; u.mpage = FX_PAGE_MASTER;
+    for (unsigned g = 0; g < 2; g++) for (unsigned i = 0; i < lsdj_fx_group_n[g]; i++)
+        assert(lsdj_fx_is_master(lsdj_fx_group[g][i]) == (int)g);   /* every page in its own group once */
+    assert(lsdj_fx_group_n[0] + lsdj_fx_group_n[1] == LSDJ_FX_PAGES && strlen(lsdj_fx_group_letters[1]) == 3);
 
     /* DRIVE: drive, distortion, warmth. Warm with no filter: low-pass on. */
     u.page = FX_PAGE_DRIVE;
@@ -99,7 +111,7 @@ int main(int argc, char **argv) {
     check_bars();
     { char title[20], big[20], label[4][7], value[4][6], caption[4][4]; uint8_t level[4];
       lsdj_fx_bars(&fx, &u, 0, title, big, label, value, caption, level);
-      assert(!strcmp(title, "LFO WAV 4/7") && !strcmp(big, "K1 LFO RATE 1/4") && !strcmp(value[3], "PN")); }
+      assert(!strcmp(title, "LFO WAV 3/4") && !strcmp(big, "K1 LFO RATE 1/4") && !strcmp(value[3], "PN")); }
     /* restore what the older checks below expect */
     for (unsigned q = 0; q < FXQ_COUNT; q++) fx.p.q[2][q] = 0;
     fx.p.comp = 0; fx.p.ch[2][FXP_TYPE] = 1; lsdj_fx_update(&fx);
@@ -127,14 +139,16 @@ int main(int argc, char **argv) {
     turn(0, 1); assert(lsdj_fx_note_of(fx.p.m[FXM_TIME]) == 6);
     turn(3, -10); assert(fx.p.m[FXM_TONE] == 44);
     {   char title[20], big[20], label[4][7], value[4][6], caption[4][4]; uint8_t level[4];
+        u.held = 1; u.mpage = FX_PAGE_ECHO;
         lsdj_fx_bars(&fx, &u, 0, title, big, label, value, caption, level);
         assert(!strcmp(big, "K1 TIME 1/4T"));
-        assert(!strcmp(title, "ECHO 6/7"));              /* echo only: no channel */
+        assert(!strcmp(title, "ECHO 2/3"));              /* echo only: no channel */
+        u.held = 0; u.mpage = FX_PAGE_MASTER;
         assert(!strcmp(label[0], "TM") && strlen(value[0]) == 2 && !strcmp(caption[0], "K1"));
         assert(!strcmp(value[3], "2C") && level[3] == 44);
         assert(level[0] == fx.p.m[FXM_TIME]);
         u.page = FX_PAGE_FILTER; lsdj_fx_bars(&fx, &u, -1, title, big, label, value, caption, level);
-        assert(!strcmp(title, "FILTER WAV 2/7") && !strcmp(value[1], "LP") && !strcmp(label[1], "TY"));
+        assert(!strcmp(title, "FILTER WAV 1/4") && !strcmp(value[1], "LP") && !strcmp(label[1], "TY"));
         assert(!strcmp(big, "SELECT: PAGE"));
         assert(level[1] == 127u / (LSDJ_FX_FILTERS - 1u));
     }
@@ -143,18 +157,15 @@ int main(int argc, char **argv) {
     for (unsigned p = 0; p < LSDJ_FX_PAGES; p++) { u.page = (uint8_t)p; check_bars(); }
     u.page = FX_PAGE_LFO;
 
-    /* Hold FX: C4..F4 mute, G4..C5 FX off, D5 freeze; lights show it. */
+    /* Hold FX: C4..F4 mute PU1..NOI; their lights are lit while the channel plays; other keys do nothing. */
     {
         lsdj_fx_t h; lsdj_fx_init(&h, echo); lsdj_fx_update(&h);
-        char l1[20], l2[20];
-        assert(lsdj_fx_hold_lights(&h) == ((1u << 7) | (1u << 9) | (1u << 11) | (1u << 12) | (1u << 14) | (1u << 16) | (1u << 18) | (1u << 19)));
-        assert(lsdj_fx_hold_keys(&h, 1u << 11, l1, l2) && h.mute == 4 && !strcmp(l1, "WAV MUTED") && !strcmp(l2, "MUTED: WAV"));
-        assert(!(lsdj_fx_hold_lights(&h) & (1u << 11)) && h.active);
-        assert(lsdj_fx_hold_keys(&h, 1u << 14, l1, l2) && h.p.fx_off == 1 && !strcmp(l1, "PU1 FX OFF"));
-        assert(lsdj_fx_hold_keys(&h, 1u << 21, l1, l2) && h.freeze && (lsdj_fx_hold_lights(&h) & (1u << 21)));
-        assert(lsdj_fx_hold_keys(&h, (1u << 7) | (1u << 9) | (1u << 12), l1, l2) && h.mute == 15 && !strcmp(l2, "MUTED: ALL"));
-        assert(!lsdj_fx_hold_keys(&h, 1u << 0, l1, l2));
-        fits(l1, 19); fits(l2, 19);
+        assert(lsdj_fx_hold_lights(&h) == ((1u << 7) | (1u << 9) | (1u << 11) | (1u << 12)));
+        assert(lsdj_fx_hold_keys(&h, 1u << 11) && h.mute == 4 && h.active);
+        assert(!(lsdj_fx_hold_lights(&h) & (1u << 11)));
+        assert(lsdj_fx_hold_keys(&h, (1u << 7) | (1u << 9) | (1u << 12)) && h.mute == 15 && !lsdj_fx_hold_lights(&h));
+        assert(!lsdj_fx_hold_keys(&h, (1u << 14) | (1u << 21) | 1u) && h.mute == 15 && !h.p.fx_off && !h.freeze);
+        assert(lsdj_fx_hold_keys(&h, 1u << 11) && h.mute == 11);
     }
 
     /* Saving: round trip with page and target; mutes and freeze not kept. */
@@ -163,6 +174,9 @@ int main(int argc, char **argv) {
     lsdj_fx_t fx2; lsdj_fx_ui_t u2; lsdj_fx_init(&fx2, echo); lsdj_fx_ui_init(&u2);
     assert(lsdj_fx_unpack(&fx2, &u2, w) && !memcmp(&fx2.p, &fx.p, sizeof fx.p) && u2.page == FX_PAGE_LFO && u2.target == u.target);
     fx.mute = 3; fx.freeze = 1; { uint32_t w2[LSDJ_FX_WORDS]; lsdj_fx_pack(&fx, &u, w2); assert(!memcmp(w, w2, sizeof w)); } fx.mute = 0; fx.freeze = 0;
+    /* A master page saved by 975: opens on FILTER (master pages are the hold-FX pages now). */
+    { lsdj_fx_ui_t m = u; m.page = FX_PAGE_ECHO; uint32_t mw[LSDJ_FX_WORDS]; lsdj_fx_pack(&fx, &m, mw);
+      lsdj_fx_ui_init(&u2); assert(lsdj_fx_unpack(&fx2, &u2, mw) && u2.page == FX_PAGE_FILTER); }
     /* Alphas 30-33: knob assignments in bytes 38-41 -> page 1. */
     {
         uint32_t ow[LSDJ_FX_WORDS]; memcpy(ow, w, sizeof ow);
@@ -202,6 +216,7 @@ int main(int argc, char **argv) {
                 uint32_t ow[LSDJ_FX_WORDS]; memcpy(ow, w, sizeof ow);
                 ow[9] = LSDJ_FX_CURSOR | 1u << 8 | p << 16;
                 unsigned expected = count == 11 ? old4[p] : p + 1;
+                if (lsdj_fx_is_master(expected)) expected = FX_PAGE_FILTER;   /* master pages: hold FX now */
                 fx2.p.bypass = 1;
                 assert(lsdj_fx_unpack_n(&fx2, &u2, ow, count) && u2.page == expected && !fx2.p.bypass);
                 fx2.p.bypass = 1; fx2.p.comp = 93; fx2.p.q[2][FXQ_WARM] = 47;
@@ -212,7 +227,7 @@ int main(int argc, char **argv) {
         for (unsigned p = 0; p < LSDJ_FX_PAGES; p++) for (unsigned bypass = 0; bypass < 2; bypass++) {
             fx.p.bypass = (uint8_t)bypass; u.page = (uint8_t)p;
             uint32_t nw[LSDJ_FX_WORDS]; lsdj_fx_pack(&fx, &u, nw);
-            assert(lsdj_fx_unpack(&fx2, &u2, nw) && u2.page == p && fx2.p.bypass == bypass);
+            assert(lsdj_fx_unpack(&fx2, &u2, nw) && u2.page == (lsdj_fx_is_master(p) ? FX_PAGE_FILTER : p) && fx2.p.bypass == bypass);
             lsdj_fx_params_t before = fx2.p;
             nw[9] = LSDJ_FX_CURSOR | 2u << 8 | 7u << 16;
             assert(!lsdj_fx_set_words(&fx2, &u2, nw, LSDJ_FX_WORDS) && !memcmp(&before, &fx2.p, sizeof before));

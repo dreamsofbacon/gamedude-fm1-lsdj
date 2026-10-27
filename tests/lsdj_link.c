@@ -39,8 +39,10 @@ static int io_mset(uint32_t v) { if (v >> 24 != 0x4D) return 0; midi_word = v; r
 static uint8_t cartridge[256 + 2 * 16384];
 static int cart_available = 1;
 static const volatile uint8_t *io_cart(uint32_t *len) { *len = sizeof cartridge; return cart_available ? cartridge : 0; }
+static uint8_t mute_now, freeze_now;
+static int io_mute(uint8_t m, uint8_t f) { if (m > 15 || f > 1) return 0; mute_now = m; freeze_now = f; return 1; }
 static const lsdj_link_io_t io = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
-                                  io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart};
+                                  io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute};
 static lsdj_link_t st;
 static uint8_t reply[LSDJ_LINK_REPLY_MAX];
 static uint32_t rn;
@@ -163,6 +165,10 @@ int main(void) {
       assert(req(LSDJ_LINK_MIDI_SET, b, 4, 0) == LSDJ_LINK_OK && midi_word == 0x4D028001u);
       assert(req(LSDJ_LINK_MIDI_GET, 0, 0, 0) == LSDJ_LINK_OK && rd(0) == 0x01 && rd(3) == 0x4D);
       uint8_t bad[4] = {0, 0, 0, 0x5A}; assert(req(LSDJ_LINK_MIDI_SET, bad, 4, 0) == LSDJ_LINK_BAD); }
+    /* MUTE_SET: the web page's channel buttons and freeze */
+    { uint8_t m[2] = {5, 1}; assert(req(LSDJ_LINK_MUTE_SET, m, 2, 0) == LSDJ_LINK_OK && mute_now == 5 && freeze_now == 1);
+      uint8_t bad[2] = {16, 0}; assert(req(LSDJ_LINK_MUTE_SET, bad, 2, 0) == LSDJ_LINK_BAD && mute_now == 5);
+      assert(req(LSDJ_LINK_MUTE_SET, m, 1, 0) == LSDJ_LINK_BAD); }
     /* Junk */
     assert(req(0x7E, 0, 0, 0) == LSDJ_LINK_BAD);
     assert(req(LSDJ_LINK_INFO, (const uint8_t[1]){1}, 1, 0) == LSDJ_LINK_BAD);

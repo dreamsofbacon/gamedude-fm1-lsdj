@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_976). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_977). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,24 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: hold FX for the master page (FM-1_977)
+
+The effects pages are split by what they act on:
+
+- **Tap FX** (or turn SELECT): the channel pages FILTER, DRIVE, LFO, LO-FI
+  (1/4..4/4), on the channel under LSDj's cursor.
+- **Hold FX**: the master pages MASTER, ECHO, ECHO MOD (1/3..3/3), shared by
+  every channel. SELECT turns them and K1-K4 play them while FX is held; the
+  page closes when FX is let go. A channel strip (row 14) shows PU1 PU2 WAV NOI,
+  lit while playing; C4 D4 E4 F4 mute / unmute them, and their key lights are
+  lit while the channel plays. These are the same mutes as MIDI CC 81 and the
+  webpage's channel buttons (link op 0x24 MUTE_SET, live only, never saved).
+  The old hold shortcuts G4-C5 (channel FX) and D5 (freeze) are gone: channel FX
+  is FILTER K1 and freeze is ECHO MOD K4.
+
+A quick tap (under 250 ms, nothing turned) never shows the master page. Saved
+setups that were left on a master page open on FILTER.
 
 ## LSDj Burrito: SEQ and the other LSDj helpers in web builds (FM-1_976)
 
@@ -87,9 +105,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_976 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_977 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_976 for alpha 76).
+Normal ROM builds use the current alpha identity (FM-1_977 for alpha 77).
 
 From this repository in WSL:
 

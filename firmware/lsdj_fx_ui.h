@@ -2,7 +2,9 @@
 /* Effects controls. KNOB 1-4 always play the four effects of the current page;
    the SELECT knob turns the pages. Each change pops up four bars (one per knob,
    lined up under LSDj's four channel columns: firmware/lsdj_overlay.h).
-   Holding FX makes piano keys shortcuts (mute, FX off, freeze).
+   Tapping FX / SELECT shows the channel pages (FILTER, DRIVE, LFO, LO-FI); holding FX
+   shows the master pages (MASTER, ECHO, ECHO MOD: shared by every channel), with a
+   channel strip: C4-F4 mute PU1 PU2 WAV NOI.
    Per-channel effects act on the target: the channel under LSDj's cursor by
    default. Packs the setup into 17 32-bit words for the save store (11 before
    alpha 66: still read).
@@ -57,10 +59,25 @@ static const char *const lsdj_fx_dest_name[LSDJ_FX_DESTS] = {"CUT", "VOL", "PAN"
 typedef struct {
     uint8_t target;          /* 0..3 one channel, LSDJ_FX_ALL, LSDJ_FX_CURSOR */
     uint8_t cursor_ch;       /* board: LSDj's cursor channel 0..3, else (unknown) 0xFF */
-    uint8_t page;            /* 0..LSDJ_FX_PAGES-1 */
+    uint8_t page;            /* the channel page shown (FX_PAGE_FILTER..FX_PAGE_LOFI) */
+    uint8_t mpage;           /* the master page (FX_PAGE_MASTER, _ECHO, _ECHO_MOD) */
+    uint8_t held;            /* FX held: the master pages are on the knobs */
 } lsdj_fx_ui_t;
 
-static void lsdj_fx_ui_init(lsdj_fx_ui_t *u) { u->target = LSDJ_FX_CURSOR; u->cursor_ch = 0xFF; u->page = 0; }
+static void lsdj_fx_ui_init(lsdj_fx_ui_t *u) { u->target = LSDJ_FX_CURSOR; u->cursor_ch = 0xFF; u->page = FX_PAGE_FILTER; u->mpage = FX_PAGE_MASTER; u->held = 0; }
+/* The two groups of pages, in SELECT order: channel pages, master pages. */
+static const uint8_t lsdj_fx_group[2][4] = {{FX_PAGE_FILTER, FX_PAGE_DRIVE, FX_PAGE_LFO, FX_PAGE_LOFI}, {FX_PAGE_MASTER, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD, FX_PAGE_MASTER}};
+static const uint8_t lsdj_fx_group_n[2] = {4, 3};
+static const char *const lsdj_fx_group_letters[2] = {"1234", "123"};   /* the screen map */
+static int lsdj_fx_is_master(unsigned p) { return p == FX_PAGE_MASTER || p >= FX_PAGE_ECHO; }
+/* The page on the knobs: the master page while FX is held. */
+static unsigned lsdj_fx_cur(const lsdj_fx_ui_t *u) { return (u->held ? u->mpage : u->page) % LSDJ_FX_PAGES; }
+/* Its place in its group (0..). */
+static unsigned lsdj_fx_pos(const lsdj_fx_ui_t *u) {
+    unsigned g = u->held ? 1u : 0u, p = lsdj_fx_cur(u);
+    for (unsigned i = 0; i < lsdj_fx_group_n[g]; i++) if (lsdj_fx_group[g][i] == p) return i;
+    return 0;
+}
 
 static int lsdj_fxk_is_echo(unsigned k) { return k >= FXK_ECHO_TIME && k <= FXK_ECHO_WOBBLE; }
 static unsigned lsdj_fxk_m(unsigned k) {
@@ -242,8 +259,8 @@ static void lsdj_fxk_turn(lsdj_fx_t *fx, lsdj_fx_ui_t *u, unsigned k, int steps)
 static int lsdj_fx_knobs(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const int32_t steps[4]) {
     int last = -1;
     for (unsigned k = 0; k < 4; k++) {
-        if (!steps[k] || lsdj_fx_page_knob[u->page % LSDJ_FX_PAGES][k] == FXK_NONE) continue;
-        lsdj_fxk_turn(fx, u, lsdj_fx_page_knob[u->page % LSDJ_FX_PAGES][k], steps[k]);
+        if (!steps[k] || lsdj_fx_page_knob[lsdj_fx_cur(u)][k] == FXK_NONE) continue;
+        lsdj_fxk_turn(fx, u, lsdj_fx_page_knob[lsdj_fx_cur(u)][k], steps[k]);
         last = (int)k;
     }
     return last;
@@ -251,11 +268,13 @@ static int lsdj_fx_knobs(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const int32_t steps[4])
 /* SELECT knob: clicks turn the pages (wrapping). */
 /* The page's four knob names (up to 6 characters), for LSDj's bottom rows. */
 static void lsdj_fx_names(const lsdj_fx_ui_t *u, char names[4][7]) {
-    for (unsigned k = 0; k < 4; k++) lsdj_fx_put(names[k], 0, lsdj_fxk_label[lsdj_fx_page_knob[u->page % LSDJ_FX_PAGES][k]]);
+    for (unsigned k = 0; k < 4; k++) lsdj_fx_put(names[k], 0, lsdj_fxk_label[lsdj_fx_page_knob[lsdj_fx_cur(u)][k]]);
 }
 static void lsdj_fx_page_turn(lsdj_fx_ui_t *u, int steps) {
-    int p = ((int)u->page + steps) % (int)LSDJ_FX_PAGES;
-    u->page = (uint8_t)(p < 0 ? p + (int)LSDJ_FX_PAGES : p);
+    unsigned g = u->held ? 1u : 0u;   /* within the group shown, wrapping */
+    int n = (int)lsdj_fx_group_n[g], i = ((int)lsdj_fx_pos(u) + steps) % n;
+    uint8_t p = lsdj_fx_group[g][i < 0 ? i + n : i];
+    if (g) u->mpage = p; else u->page = p;
 }
 
 /* Discrete modes are choices, never amounts. Keep the same short names in the
@@ -277,7 +296,7 @@ static const char *lsdj_fxk_choice_short(unsigned k, unsigned i) {
     return "";
 }
 static void lsdj_fx_bar_choices(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uint8_t nchoice[4], uint8_t pick[4], char choice[4][6][3]) {
-    unsigned pg = u->page % LSDJ_FX_PAGES;
+    unsigned pg = lsdj_fx_cur(u);
     for (unsigned k = 0; k < 4; k++) {
         unsigned e = lsdj_fx_page_knob[pg][k], n = lsdj_fxk_choices(e);
         nchoice[k] = 0; pick[k] = 0;
@@ -292,12 +311,12 @@ static void lsdj_fx_bar_choices(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uint
    ("CUTOFF 64"), or with hot < 0 how pages turn. Fields as lsdj_ov_bars_t. */
 static void lsdj_fx_bars(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, int hot, char title[20], char big[20],
                          char label[4][7], char value[4][6], char caption[4][4], uint8_t level[4]) {
-    unsigned pg = u->page % LSDJ_FX_PAGES;
+    unsigned pg = lsdj_fx_cur(u);
     uint32_t n = lsdj_fx_put(title, 0, lsdj_fx_page_name[pg]);
     int chan = 0;
     for (unsigned k = 0; k < 4; k++) chan |= lsdj_fxk_on_channel(lsdj_fx_page_knob[pg][k]);
     if (chan) { n = lsdj_fx_put(title, n, " "); n = lsdj_fx_put(title, n, lsdj_fx_target_name[lsdj_fx_eff(u)]); }
-    n = lsdj_fx_put(title, n, " "); n = lsdj_fx_num(title, n, pg + 1u); n = lsdj_fx_put(title, n, "/"); lsdj_fx_num(title, n, LSDJ_FX_PAGES);
+    n = lsdj_fx_put(title, n, " "); n = lsdj_fx_num(title, n, lsdj_fx_pos(u) + 1u); n = lsdj_fx_put(title, n, "/"); lsdj_fx_num(title, n, lsdj_fx_group_n[u->held ? 1 : 0]);
     for (unsigned k = 0; k < 4; k++) {
         unsigned e = lsdj_fx_page_knob[pg][k];
         if (e == FXK_NONE) { label[k][0] = value[k][0] = caption[k][0] = 0; level[k] = 0; continue; }
@@ -314,53 +333,26 @@ static void lsdj_fx_bars(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, int hot, ch
         big[0] = 'K'; big[1] = (char)('1' + hot); big[2] = ' '; big[3] = 0;
         uint32_t m = lsdj_fx_put(big, 3, name);
         m = lsdj_fx_put(big, m, " "); lsdj_fx_put(big, m, full);
-    } else lsdj_fx_put(big, 0, fx->p.bypass ? "ALL FX OFF" : "SELECT: PAGE");
+    } else lsdj_fx_put(big, 0, u->held ? "C4-F4: MUTE" : fx->p.bypass ? "ALL FX OFF" : "SELECT: PAGE");
 }
 
-/* ---------- hold FX: piano key shortcuts ---------- */
-/* Key bits (27-bit mask, F3 = bit 0): C4 D4 E4 F4 mute PU1 PU2 WAV NOI,
-   G4 A4 B4 C5 switch their FX on/off, D5 freezes the echo. */
+/* ---------- hold FX: the channel strip ----------
+   The master pages show PU1 PU2 WAV NOI under the bars (lit: playing), the same
+   mute as the web page's channel buttons and MIDI CC 81. C4 D4 E4 F4 (key bits,
+   F3 = bit 0) toggle them; their lights are lit while the channel plays. Channel FX
+   on/off is FILTER K1, freeze is ECHO MOD K4. */
 static const uint8_t lsdj_fx_mute_key[4] = {7, 9, 11, 12};
-static const uint8_t lsdj_fx_off_key[4] = {14, 16, 18, 19};
-#define LSDJ_FX_FREEZE_KEY 21u
-static const char *const lsdj_fx_ch_name[4] = {"PU1", "PU2", "WAV", "NOI"};
-/* Keys pressed this frame while FX is held. Writes what happened (two lines)
-   and returns 1 if anything did. */
-static int lsdj_fx_hold_keys(lsdj_fx_t *fx, uint32_t down, char l1[20], char l2[20]) {
+/* Keys pressed this frame while FX is held; 1 if a mute changed. */
+static int lsdj_fx_hold_keys(lsdj_fx_t *fx, uint32_t down) {
     int did = 0;
-    for (unsigned c = 0; c < 4; c++) {
-        if (down & (1u << lsdj_fx_mute_key[c])) {
-            fx->mute ^= (uint8_t)(1u << c); did = 1;
-            uint32_t n = lsdj_fx_put(l1, 0, lsdj_fx_ch_name[c]);
-            lsdj_fx_put(l1, n, (fx->mute >> c) & 1u ? " MUTED" : " PLAYING");
-        }
-        if (down & (1u << lsdj_fx_off_key[c])) {
-            fx->p.fx_off ^= (uint8_t)(1u << c); did = 1;
-            uint32_t n = lsdj_fx_put(l1, 0, lsdj_fx_ch_name[c]);
-            lsdj_fx_put(l1, n, (fx->p.fx_off >> c) & 1u ? " FX OFF" : " FX ON");
-        }
-    }
-    if (down & (1u << LSDJ_FX_FREEZE_KEY)) {
-        fx->freeze ^= 1u; did = 1;
-        lsdj_fx_put(l1, 0, fx->freeze ? "ECHO FROZEN" : "ECHO UNFROZEN");
-    }
-    if (did) {
-        uint32_t n = lsdj_fx_put(l2, 0, "MUTED:");
-        if (fx->mute == 15u) lsdj_fx_put(l2, n, " ALL");
-        else if (!fx->mute) lsdj_fx_put(l2, n, " NONE");
-        else for (unsigned c = 0; c < 4; c++) if ((fx->mute >> c) & 1u) { n = lsdj_fx_put(l2, n, " "); n = lsdj_fx_put(l2, n, lsdj_fx_ch_name[c]); }
-        lsdj_fx_update(fx);
-    }
+    for (unsigned c = 0; c < 4; c++)
+        if (down & (1u << lsdj_fx_mute_key[c])) { fx->mute ^= (uint8_t)(1u << c); did = 1; }
+    if (did) lsdj_fx_update(fx);
     return did;
 }
-/* Key lights while FX is held: lit = channel playing / FX on / echo frozen. */
 static uint32_t lsdj_fx_hold_lights(const lsdj_fx_t *fx) {
     uint32_t l = 0;
-    for (unsigned c = 0; c < 4; c++) {
-        if (!((fx->mute >> c) & 1u)) l |= 1u << lsdj_fx_mute_key[c];
-        if (!((fx->p.fx_off >> c) & 1u)) l |= 1u << lsdj_fx_off_key[c];
-    }
-    if (fx->freeze) l |= 1u << LSDJ_FX_FREEZE_KEY;
+    for (unsigned c = 0; c < 4; c++) if (!((fx->mute >> c) & 1u)) l |= 1u << lsdj_fx_mute_key[c];
     return l;
 }
 
@@ -422,6 +414,7 @@ static int lsdj_fx_unpack_n(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const uint32_t *w, u
     fx->p.comp = comp;
     fx->p.bypass = bypass;
     (void)target;   /* the effects always follow LSDj's cursor now (a saved lock was easy to set by accident) */
+    if (lsdj_fx_is_master(page)) page = FX_PAGE_FILTER;   /* master pages open with FX held now */
     fx->p.fx_off = off; u->target = LSDJ_FX_CURSOR; u->page = (uint8_t)(page % LSDJ_FX_PAGES);
     lsdj_fx_update(fx);
     return 1;

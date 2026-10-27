@@ -326,9 +326,10 @@ static lsdj_fx_t fx;
 static lsdj_fx_ui_t fxu;
 static uint8_t fx_echo[LSDJ_FX_ECHO_LEN] __attribute__((section(".pool"),aligned(4)));
 static void fx_hook(const int16_t *s,int32_t *l,int32_t *r){lsdj_fx_mix(&fx,s,l,r);}   /* audio interrupt */
-/* FX button: a tap opens/closes the page; held, piano keys are shortcuts
-   (lsdj_fx_hold_keys) and light up to show the state. */
-static uint8_t fx_held,fx_used,fx_hint_shown;
+/* FX button: a tap shows the channel pages; held, the master pages (and the
+   channel strip: C4-F4 mute, lsdj_fx_hold_keys), from FX_HOLD_MS or the first knob / key. */
+#define FX_HOLD_MS 250u
+static uint8_t fx_held,fx_used;
 static uint32_t fx_held_since,fx_hold_keys_prev;
 /* Where LSDj keeps the channel under its cursor (kept on the CHAIN and PHRASE
    screens too) and its live tempo, per version, found with harness/find_cursor.c
@@ -421,6 +422,7 @@ static void fx_bars_fill(void){
     lsdj_fx_bars(&fx,&fxu,bars.hot,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
     lsdj_fx_bar_choices(&fx,&fxu,bars.nchoice,bars.pick,bars.choice);
     bars.amount_scale=1;
+    bars.strip=fxu.held?(uint8_t)(0x80u|fx.mute):0u;
     { unsigned t=lsdj_fx_eff(&fxu);bars.chan=(int8_t)(t<4u?(int)t:-1); }   /* frame the channel the effects act on */
 }
 static void fx_bars_show(int hot){
@@ -685,7 +687,6 @@ static void seq_button(void){
 static void native_draw(void){
     lsdj_nat_t n={gp_pixels(),gp_vram(),gp_lcdc(),gp_bgp(),gp_shades()};
     lsdj_nat_mode(&n,seq_cover,seq_screen==4u);
-    unsigned page=fxu.page%LSDJ_FX_PAGES;
     /* the panel, with the knobs' names on LSDj's bottom two rows: the effects
        page's, or the cue / tempo panel's own while ARP / EDIT is held. Only
        while the panel shows: otherwise LSDj's screen is left whole. */
@@ -695,7 +696,7 @@ static void native_draw(void){
         if(own)for(unsigned k=0;k<4u;k++){unsigned j=0;for(;j<6u&&bars.label[k][j];j++)names[k][j]=bars.label[k][j];names[k][j]=0;}
         else lsdj_fx_names(&fxu,names);
         lsdj_nat_bars(&n,&bars,lsdj_theme_of(settings.theme)->accent);
-        if(!own)lsdj_nat_pagemap(&n,lsdj_fx_page_letters,page);   /* the effects pages in the screen map */
+        if(!own)lsdj_nat_pagemap(&n,lsdj_fx_group_letters[fxu.held?1:0],lsdj_fx_pos(&fxu));   /* the pages of the group, in the screen map */
         lsdj_nat_names(&n,(const char(*)[7])names,bars.hot);
     }else bars.until_ms=0;
     if(menu.open){
@@ -773,7 +774,7 @@ static int lk_store_config(void){
     return rc?-1:0;
 }
 static void lk_live(lsdj_link_live_t *l){
-    l->page=fxu.page;l->cursor_ch=fxu.cursor_ch;l->bpm=fx.bpm;l->mute=fx.mute;l->freeze=fx.freeze;l->playing=0;
+    l->page=(uint8_t)lsdj_fx_cur(&fxu);l->cursor_ch=fxu.cursor_ch;l->bpm=fx.bpm;l->mute=fx.mute;l->freeze=fx.freeze;l->playing=0;
     if(armed_addr)for(unsigned c=0;c<4;c++)if(gp_wram_peek((uint16_t)(armed_addr+c)))l->playing|=(uint8_t)(1u<<c);
 }
 #if LSDJ_BLE
@@ -793,9 +794,13 @@ static const volatile uint8_t *lk_cartridge(uint32_t *len){
 #endif
     return 0;
 }
+static int lk_mute_set(uint8_t m,uint8_t f){   /* the web page's channel buttons and freeze */
+    if(m>15u||f>1u)return 0;
+    fx.mute=m;fx.freeze=f;lsdj_fx_update(&fx);return 1;
+}
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,
-    lk_midi_get,lk_midi_set,lk_cartridge};
+    lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set};
 static int app_sysex_frame(const uint8_t *frame,uint32_t size){
     if(!lsdj_link_match(frame,size))return 0;
     static uint8_t reply[LSDJ_LINK_REPLY_MAX];
@@ -904,6 +909,8 @@ static void fm1_input_frame(void){
         bars.amount_scale=0;
         bars.hot=-1;bars.chan=-1;lsdj_ov_bars_keep(&bars,fm1_ms);
     }
+    if(fx_held&&!fxu.held&&(fm1_ms-fx_held_since>=FX_HOLD_MS||enc[0]||enc[2]||enc[3]||enc[4]||enc[5]||(key_lo&~fx_hold_keys_prev)))
+        {fxu.held=1;bars.hot=-1;}   /* held (or used): the master pages, the hint until a knob turns */
     {   /* KNOB 1-4 (encoders 2-5): the page's four effects */
         int32_t st[4]={enc[2],enc[3],enc[4],enc[5]};
         int k=lsdj_fx_knobs(&fx,&fxu,st);
@@ -914,13 +921,10 @@ static void fm1_input_frame(void){
         if(fx_held)fx_used=1;
     }
     if(!cue.held&&!tempo.held&&lsdj_ov_bars_active(&bars,fm1_ms))fx_bars_fill();
-    if(fx_held){   /* FX held: piano keys are shortcuts; LSDj gets no input meanwhile */
-        static char l1[20],l2[20];
+    if(fx_held){   /* FX held: the master pages and the channel strip; LSDj gets no input meanwhile */
         uint32_t down=key_lo&~fx_hold_keys_prev;fx_hold_keys_prev=key_lo;
-        if(down&&lsdj_fx_hold_keys(&fx,down,l1,l2)){fx_used=1;lsdj_ov_show(&ov,l1,l2,fm1_ms);}
-        else if(!fx_used&&!fx_hint_shown&&fm1_ms-fx_held_since>400u){   /* held without a key: how it works */
-            fx_hint_shown=1;lsdj_ov_show(&ov,"HOLD FX: C4-F4 MUTE","G4-C5 FX  D5 FREEZE",fm1_ms);
-        }
+        if(down&&lsdj_fx_hold_keys(&fx,down))fx_used=1;
+        if(fxu.held){fx_bars_fill();lsdj_ov_bars_keep(&bars,fm1_ms);}
         piano_set(lsdj_fx_hold_lights(&fx));
         gp_buttons(sync_btn);return;
     }
@@ -1107,11 +1111,13 @@ void gb_cstart(const uint32_t *parameters){
             if(songrow_addr&&((panel^prev_panel)&(1u<<ARP_BUTTON)))cue_button((panel>>ARP_BUTTON)&1u);
             if((panel^prev_panel)&(1u<<EDIT_BUTTON))tempo_button((panel>>EDIT_BUTTON)&1u);
             if(panel&~prev_panel&(1u<<FX_BUTTON)&&!menu.open){
-                fx_held=1;fx_used=0;fx_hint_shown=0;fx_held_since=fm1_ms;fx_hold_keys_prev=key_lo;
+                fx_held=1;fx_used=0;fx_held_since=fm1_ms;fx_hold_keys_prev=key_lo;
             }
             if(fx_held&&!(panel&(1u<<FX_BUTTON))){   /* released: a tap toggles the page */
-                fx_held=0;
-                if(!fx_used&&!menu.open)fx_bars_show(-1);
+                int tap=!fx_used&&fm1_ms-fx_held_since<FX_HOLD_MS;
+                fx_held=0;fxu.held=0;
+                if(tap&&!menu.open)fx_bars_show(-1);   /* a tap: the channel pages */
+                else bars.until_ms=0;                  /* let go: the master pages close */
             }
             if(panel&~prev_panel&(1u<<GLO_BUTTON)){
                 if(!menu.open){lsdj_menu_open(&menu);bars.until_ms=0;}   /* the effects pop-up goes */

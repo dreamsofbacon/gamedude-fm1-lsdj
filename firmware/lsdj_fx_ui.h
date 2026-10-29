@@ -2,11 +2,11 @@
 /* Effects controls. KNOB 1-4 always play the four effects of the current page;
    the SELECT knob turns the pages. Each change pops up four bars (one per knob,
    lined up under LSDj's four channel columns: firmware/lsdj_overlay.h).
-   FM-1_982: FX opens the panel on the channel pages FILTER, DRIVE, LFO, LO-FI (each channel
-   sends to the shared echo from FILTER K2, next to its FX on/off); FX again: the master
-   pages MASTER (ALL FX, COMP, echo MIX and TIME), ECHO, ECHO MOD, with a channel strip:
-   C4-F4 mute PU1 PU2 WAV NOI; FX a third time closes it (a knob or SELECT also pops the
-   panel up for a moment). SELECT turns the pages of the list shown.
+   Two areas (FM-1_984). Turning a knob or SELECT pops up the channel pages FILTER, DRIVE,
+   LFO, LO-FI (each channel sends to the shared echo from FILTER K2, next to its FX on/off)
+   for a moment; the FX button opens the master pages MASTER (ALL FX, COMP, echo MIX and
+   TIME), ECHO, ECHO MOD, with a channel strip: C4-F4 mute PU1 PU2 WAV NOI, until FX again.
+   SELECT turns the pages of the area shown. (982: FX = channel pages, master, closed.)
    SELECT stops at the first and last page (PAGE WRAP on: it goes round).
    Per-channel effects act on the target: the channel under LSDj's cursor by
    default. Packs the setup into 17 32-bit words for the save store (11 before

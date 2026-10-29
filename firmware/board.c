@@ -337,9 +337,10 @@ static lsdj_fx_t fx;
 static lsdj_fx_ui_t fxu;
 static uint8_t fx_echo[LSDJ_FX_ECHO_LEN] __attribute__((section(".pool"),aligned(4)));
 static void fx_hook(const int16_t *s,int32_t *l,int32_t *r){lsdj_fx_mix(&fx,s,l,r);}   /* audio interrupt */
-/* FX button (FM-1_982): opens the effects panel on the channel pages; again: the master pages
-   (MASTER, ECHO, ECHO MOD: the channel strip, C4-F4 mute, lsdj_fx_hold_keys); again: closed.
-   The panel stays open meanwhile. */
+/* Two areas (FM-1_984). The channel effects: turning KNOB 1-4 or SELECT pops up the channel pages
+   (FILTER .. LO-FI) for the channel under LSDj's cursor, for a moment, as before; LSDj keeps its input.
+   The master effects: only the FX button, which opens the master pages (MASTER, ECHO, ECHO MOD: the
+   channel strip, C4-F4 mute, lsdj_fx_hold_keys) and keeps them open until FX again. */
 static uint8_t fx_open;
 static uint32_t fx_keys_prev;
 /* Where LSDj keeps the channel under its cursor (kept on the CHAIN and PHRASE
@@ -1267,10 +1268,9 @@ void gb_cstart(const uint32_t *parameters){
             if(panel&~prev_panel&(1u<<SEQ_BUTTON))seq_button();
             if(songrow_addr&&((panel^prev_panel)&(1u<<ARP_BUTTON)))cue_button((panel>>ARP_BUTTON)&1u);
             if((panel^prev_panel)&(1u<<EDIT_BUTTON))tempo_button((panel>>EDIT_BUTTON)&1u);
-            if(panel&~prev_panel&(1u<<FX_BUTTON)&&!menu.open){   /* FX: channel pages, master pages, closed */
-                if(!fx_open){fx_open=1;lsdj_fx_master(&fxu,0);fx_bars_show(-1);}
-                else if(!lsdj_fx_on_master(&fxu)){lsdj_fx_master(&fxu,1);fx_bars_show(-1);}
-                else{fx_open=0;lsdj_fx_master(&fxu,0);bars.until_ms=0;}
+            if(panel&~prev_panel&(1u<<FX_BUTTON)&&!menu.open){   /* FX: the master pages open / closed */
+                if(fx_open){fx_open=0;lsdj_fx_master(&fxu,0);bars.until_ms=0;}
+                else{fx_open=1;lsdj_fx_master(&fxu,1);fx_bars_show(-1);}
             }
             if(panel&~prev_panel&(1u<<GLO_BUTTON)){
                 if(!menu.open){lsdj_menu_open(&menu);fx_open=0;lsdj_fx_master(&fxu,0);bars.until_ms=0;}   /* the effects panel goes */

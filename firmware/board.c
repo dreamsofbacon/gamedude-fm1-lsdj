@@ -915,13 +915,25 @@ static uint32_t lk_feat_get(void){return lsdj_feat_pack(&feat);}
 static int lk_feat_set(uint32_t v){lsdj_feat_t t;if(!lsdj_feat_unpack(v,&t))return 0;feat=t;feat_apply();return 1;}
 /* The screen mirror: the 160x144 picture as last shown (native_draw drew the panels into it). */
 static const volatile uint16_t *lk_screen(uint32_t *shown){*shown=display_count;return gp_pixels();}
+/* SCREEN_SYNC (USB only): the bands asked for go a row at a time from the main loop, each
+   only once the SysEx queue is empty (notes wait at most one row, ~1 ms). */
+static uint32_t scr_bands;static uint8_t scr_row,scr_round,link_ble;
+static uint8_t link_reply[LSDJ_LINK_REPLY_MAX];
+static int lk_screen_stream(uint32_t bands,uint8_t round){if(link_ble)return 0;scr_bands=bands;scr_row=0;scr_round=round;return 1;}
+static void screen_stream(void){
+    if(!scr_bands||so_w!=so_r)return;
+    while(scr_row<LSDJ_LINK_SCREEN_H&&!(scr_bands>>(scr_row>>3)&1u))scr_row++;
+    if(scr_row>=LSDJ_LINK_SCREEN_H){scr_bands=0;return;}
+    unsigned y=scr_row++;
+    if(!(scr_row&7u))scr_bands&=~(1u<<(y>>3));
+    if(ota_wire_send(link_reply,lsdj_link_screen_pixels(gp_pixels(),y,scr_round,link_reply)))scr_bands=0;   /* USB gone */
+}
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,
-    lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set,lk_feat_get,lk_feat_set,lk_screen};
+    lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set,lk_feat_get,lk_feat_set,lk_screen,lk_screen_stream};
 static int app_sysex_frame(const uint8_t *frame,uint32_t size){
     if(!lsdj_link_match(frame,size))return 0;
-    static uint8_t reply[LSDJ_LINK_REPLY_MAX];
-    ota_wire_send(reply,lsdj_link_handle(&link_state,&link_io,frame,size,fm1_ms,reply));
+    ota_wire_send(link_reply,lsdj_link_handle(&link_state,&link_io,frame,size,fm1_ms,link_reply));
     return 1;
 }
 #if LSDJ_BLE
@@ -958,7 +970,7 @@ void core_ble_midi(const uint8_t *m,uint32_t n,uint32_t sent_ms){   /* as a USB-
 void core_ble_sysex(const uint8_t *m,uint32_t n){
     if(!lsdj_link_match(m,n))return;
     static uint8_t reply[LSDJ_LINK_REPLY_MAX];
-    uint32_t k=lsdj_link_handle(&link_state,&link_io,m,n,fm1_ms,reply);
+    link_ble=1;uint32_t k=lsdj_link_handle(&link_state,&link_io,m,n,fm1_ms,reply);link_ble=0;
     if(k)(void)lsdj_ble_send(reply,k);
 }
 /* The address: random static, the same every start (from this unit's calibration),
@@ -1253,6 +1265,7 @@ void gb_cstart(const uint32_t *parameters){
         master_poll();
 #endif
         recovery_service();
+        screen_stream();
         lsdj_link_poll(&link_state,&link_io,fm1_ms);   /* an import whose page went away */
 #if LSDJ_BLE
         ble_frame();

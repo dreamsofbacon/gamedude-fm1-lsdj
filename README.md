@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_984). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_985). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,15 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: faster screen mirror (FM-1_985)
+
+- **The web page's screen mirror is several times faster.** One request (0x27
+  SCREEN_SYNC) carries the hashes the page holds; the FM-1 answers with its own and
+  then sends the changed rows by itself (0x28 SCREEN_PIXELS), packed 7 bits to a byte
+  with 0-4 bits a pixel, instead of one request per row. Rows go from the main loop,
+  one at a time once the USB SysEx queue is empty. USB only; over Bluetooth (and with
+  FM-1_983/984) the page reads rows one by one as before. No RAM added.
 
 ## LSDj Burrito: two effects areas (FM-1_984)
 
@@ -153,9 +162,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_984 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_985 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_984 for alpha 84).
+Normal ROM builds use the current alpha identity (FM-1_985 for alpha 85).
 
 From this repository in WSL:
 

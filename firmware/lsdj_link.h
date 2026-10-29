@@ -52,6 +52,20 @@
    op 0x26 SCREEN_ROW u8 row (0..143) -> u8 row, u8 colours (1..16), colours x u16
                              RGB565 (as the LCD), 80 bytes: pixel 2i low nibble,
                              2i+1 high (colour indices); more than 16: status 2
+   op 0x27 SCREEN_SYNC u32 force (bit per band), 18 x u16 hashes the page holds, u8 round
+                          -> u32 pictures shown, 18 x u16 hashes, u32 bands that follow
+                             (FM-1_985+, USB only: status 1 over Bluetooth and before).
+                             The bands whose hash differs (or forced) then come by
+                             themselves, top to bottom, one SCREEN_PIXELS message per row,
+                             between the main loop's other work; a new SYNC replaces the
+                             rows still to come (no bands: stops them).
+   op 0x28 SCREEN_PIXELS  sent, never asked: F0 7D 'G' 'S' 28 status round bits F7
+                             (round: the SYNC's, low 7 bits, so the page can tell a late
+                             row from an earlier SYNC), the bits 7 to a byte, lowest
+                             first (not pairs): u8 row, 4 bits
+                             colours - 1, colours x u16 RGB565, then 160 colour indices
+                             of 0 (one colour), 1, 2, 3 or 4 bits. More than 16
+                             colours: status 2 and the row only.
    status 0 ok, 1 bad request, 2 wrong state, 3 crc mismatch, 4 flash error.
    An import with no CHUNK / COMMIT for LSDJ_LINK_TIMEOUT_MS is aborted.
    Pure logic, the hardware through lsdj_link_io_t: tests/lsdj_link.c. */
@@ -71,7 +85,7 @@ enum { LSDJ_LINK_INFO = 0x01, LSDJ_LINK_READ, LSDJ_LINK_BEGIN, LSDJ_LINK_CHUNK_O
        LSDJ_LINK_THEME_GET, LSDJ_LINK_THEME_SET, LSDJ_LINK_STORE, LSDJ_LINK_MIDI_GET, LSDJ_LINK_MIDI_SET,
        LSDJ_LINK_FEAT_GET, LSDJ_LINK_FEAT_SET,
        LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ, LSDJ_LINK_MUTE_SET,
-       LSDJ_LINK_SCREEN_INFO, LSDJ_LINK_SCREEN_ROW };
+       LSDJ_LINK_SCREEN_INFO, LSDJ_LINK_SCREEN_ROW, LSDJ_LINK_SCREEN_SYNC, LSDJ_LINK_SCREEN_PIXELS };
 #define LSDJ_LINK_SCREEN_W     160u
 #define LSDJ_LINK_SCREEN_H     144u
 #define LSDJ_LINK_SCREEN_BANDS 18u   /* LSDj's character rows */
@@ -112,6 +126,8 @@ typedef struct {
     uint32_t (*feat_get)(void);                  /* the feature switches; NULL: not supported (status 1) */
     int (*feat_set)(uint32_t v);
     const volatile uint16_t *(*screen)(uint32_t *shown); /* the 160x144 picture; NULL: not supported (status 1) */
+    int (*screen_stream)(uint32_t bands, uint8_t round); /* send these bands' rows after this reply (SCREEN_SYNC);
+                                                    0 over a link that cannot (status 1); NULL: not supported */
 } lsdj_link_io_t;
 
 /* One band's hash (FNV-1a over the pixels, folded to 16 bits). */
@@ -120,6 +136,42 @@ static uint16_t lsdj_link_band_hash(const volatile uint16_t *px, unsigned band) 
     const volatile uint16_t *p = px + band * 8u * LSDJ_LINK_SCREEN_W;
     for (unsigned i = 0; i < 8u * LSDJ_LINK_SCREEN_W; i++) { h ^= p[i]; h *= 16777619u; }
     return (uint16_t)(h ^ h >> 16);
+}
+
+/* One row as colours (pal) and an index per pixel; the number of colours, 0 if more than 16. */
+static unsigned lsdj_link_row_colours(const volatile uint16_t *px, unsigned y, uint16_t pal[16], uint8_t k[LSDJ_LINK_SCREEN_W]) {
+    unsigned np = 0;
+    for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) {
+        uint16_t c = px[y * LSDJ_LINK_SCREEN_W + x]; unsigned i = 0;   /* read once: indices match the colours */
+        while (i < np && pal[i] != c) i++;
+        if (i == np) { if (np == 16u) return 0; pal[np++] = c; }
+        k[x] = (uint8_t)i;
+    }
+    return np;
+}
+typedef struct { uint8_t *r; uint32_t n, acc; unsigned bits; } lsdj_link_bits_t;
+static void lsdj_link_bits(lsdj_link_bits_t *b, uint32_t v, unsigned bits) {   /* bits <= 16 */
+    b->acc |= v << b->bits; b->bits += bits;
+    while (b->bits >= 7u) { b->r[b->n++] = (uint8_t)(b->acc & 127u); b->acc >>= 7; b->bits -= 7u; }
+}
+/* A SCREEN_PIXELS message for row y (at most 138 bytes); its length. */
+static uint32_t lsdj_link_screen_pixels(const volatile uint16_t *px, unsigned y, uint8_t round, uint8_t *r) {
+    uint16_t pal[16]; uint8_t k[LSDJ_LINK_SCREEN_W];
+    unsigned np = lsdj_link_row_colours(px, y, pal, k);
+    lsdj_link_bits_t b = {r, 0, 0, 0};
+    r[b.n++] = 0xf0; r[b.n++] = 0x7d; r[b.n++] = 'G'; r[b.n++] = 'S'; r[b.n++] = LSDJ_LINK_SCREEN_PIXELS;
+    r[b.n++] = np ? 0u : 2u;
+    r[b.n++] = round & 127u;
+    lsdj_link_bits(&b, y, 8);
+    if (np) {
+        unsigned w = np > 8u ? 4u : np > 4u ? 3u : np > 2u ? 2u : np > 1u ? 1u : 0u;
+        lsdj_link_bits(&b, np - 1u, 4);
+        for (unsigned i = 0; i < np; i++) lsdj_link_bits(&b, pal[i], 16);
+        if (w) for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) lsdj_link_bits(&b, k[x], w);
+    }
+    if (b.bits) r[b.n++] = (uint8_t)(b.acc & 127u);
+    r[b.n++] = 0xf7;
+    return b.n;
 }
 
 typedef struct {
@@ -322,19 +374,29 @@ static uint32_t lsdj_link_handle(lsdj_link_t *s, const lsdj_link_io_t *io, const
         uint32_t shown;
         const volatile uint16_t *px = io->screen ? io->screen(&shown) : 0;
         if (!px || !lsdj_link_unpack(args, an, d, 1) || d[0] >= LSDJ_LINK_SCREEN_H) { status = LSDJ_LINK_BAD; break; }
-        uint16_t row[LSDJ_LINK_SCREEN_W], pal[16]; unsigned np = 0;
-        for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) row[x] = px[d[0] * LSDJ_LINK_SCREEN_W + x];   /* one copy: indices match the colours */
+        uint16_t pal[16]; uint8_t k[LSDJ_LINK_SCREEN_W];
+        unsigned np = lsdj_link_row_colours(px, d[0], pal, k);
+        if (!np) { status = LSDJ_LINK_STATE; break; }
         uint8_t *ix = d + 1;   /* 80 bytes (d holds 132) */
-        for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W && np <= 16u; x++) {
-            unsigned k = 0;
-            while (k < np && pal[k] != row[x]) k++;
-            if (k == np) { if (np == 16u) { np = 17u; break; } pal[np++] = row[x]; }
-            if (x & 1u) ix[x >> 1] |= (uint8_t)(k << 4); else ix[x >> 1] = (uint8_t)k;
-        }
-        if (np > 16u) { status = LSDJ_LINK_STATE; break; }
+        for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x += 2u) ix[x >> 1] = (uint8_t)(k[x] | k[x + 1u] << 4);
         n = lsdj_link_put8(r, n, d[0]); n = lsdj_link_put8(r, n, (uint8_t)np);
         for (unsigned k = 0; k < np; k++) n = lsdj_link_put16(r, n, pal[k]);
         n = lsdj_link_put(r, n, ix, LSDJ_LINK_SCREEN_W / 2u);
+        break;
+    }
+    case LSDJ_LINK_SCREEN_SYNC: {
+        uint32_t shown = 0, send = 0;
+        const volatile uint16_t *px = io->screen && io->screen_stream ? io->screen(&shown) : 0;
+        if (!px || !lsdj_link_unpack(args, an, d, 5u + 2u * LSDJ_LINK_SCREEN_BANDS)) { status = LSDJ_LINK_BAD; break; }
+        uint32_t force = lsdj_link_le32(d);
+        n = lsdj_link_put32(r, n, shown);
+        for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) {
+            uint16_t hb = lsdj_link_band_hash(px, b);
+            n = lsdj_link_put16(r, n, hb);
+            if ((force >> b & 1u) || hb != (uint16_t)(d[4 + 2 * b] | d[5 + 2 * b] << 8)) send |= 1u << b;
+        }
+        if (!io->screen_stream(send, d[4 + 2 * LSDJ_LINK_SCREEN_BANDS])) { status = LSDJ_LINK_BAD; n = 6; break; }
+        n = lsdj_link_put32(r, n, send);
         break;
     }
     case LSDJ_LINK_BT:

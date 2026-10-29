@@ -46,9 +46,29 @@ static uint32_t io_eget(void) { return feat_word; }
 static int io_eset(uint32_t v) { if (v >> 24 != 0x46) return 0; feat_word = v; return 1; }
 static uint16_t pic[LSDJ_LINK_SCREEN_W * LSDJ_LINK_SCREEN_H];
 static const volatile uint16_t *io_screen(uint32_t *shown) { *shown = 4242; return pic; }
+static uint32_t stream_bands = 0xDEAD; static int stream_ok = 1;   /* 0: as over Bluetooth */
+static uint8_t stream_round;
+static int io_stream(uint32_t bands, uint8_t round) { if (!stream_ok) return 0; stream_bands = bands; stream_round = round; return 1; }
 static const lsdj_link_io_t io = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
                                   io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute,
-                                  io_eget, io_eset, io_screen};
+                                  io_eget, io_eset, io_screen, io_stream};
+/* A SCREEN_PIXELS message -> row (or -1), px; checks the framing. Status in *status. */
+static int unpixels(const uint8_t *m, uint32_t n, uint16_t px[LSDJ_LINK_SCREEN_W], unsigned *status) {
+    assert(n >= 10 && m[0] == 0xf0 && m[1] == 0x7d && m[2] == 'G' && m[3] == 'S' && m[4] == LSDJ_LINK_SCREEN_PIXELS && m[n - 1] == 0xf7);
+    for (uint32_t i = 1; i < n - 1; i++) assert(m[i] < 128);
+    *status = m[5];
+    assert(m[6] == 99);   /* the round */
+    uint32_t acc = 0, i = 7; unsigned bits = 0;
+#define TAKE(w, out) do { while (bits < (w)) { assert(i < n - 1); acc |= (uint32_t)m[i++] << bits; bits += 7; } (out) = acc & ((1u << (w)) - 1u); acc >>= (w); bits -= (w); } while (0)
+    unsigned row, np1, pal[16]; TAKE(8, row);
+    if (*status) { assert(i == n - 1); return (int)row; }
+    TAKE(4, np1); unsigned np = np1 + 1, w = np > 8 ? 4 : np > 4 ? 3 : np > 2 ? 2 : np > 1 ? 1 : 0;
+    for (unsigned k = 0; k < np; k++) TAKE(16, pal[k]);
+    for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) { unsigned k = 0; if (w) TAKE(w, k); assert(k < np); px[x] = (uint16_t)pal[k]; }
+    assert(i == n - 1 && bits < 7);   /* nothing left over */
+#undef TAKE
+    return (int)row;
+}
 /* firmware before FM-1_979: no feature switches */
 static const lsdj_link_io_t io_old = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
                                       io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute};
@@ -214,10 +234,47 @@ int main(void) {
       uint8_t q[6] = {0x7d, 'G', 'S', LSDJ_LINK_SCREEN_INFO};   /* firmware before FM-1_983 */
       rn = lsdj_link_handle(&st, &io_old, q, 4, 0, reply); assert(reply[5] == LSDJ_LINK_BAD);
       q[3] = LSDJ_LINK_SCREEN_ROW; rn = lsdj_link_handle(&st, &io_old, q, 6, 0, reply); assert(reply[5] == LSDJ_LINK_BAD); }
+    /* SCREEN_SYNC / SCREEN_PIXELS (FM-1_985): the bands that differ, then their rows packed */
+    { for (unsigned i = 0; i < LSDJ_LINK_SCREEN_W * LSDJ_LINK_SCREEN_H; i++) pic[i] = (uint16_t)(0x0841u * ((i * 7u / 5u) % 4u));
+      uint8_t q[5 + 2 * LSDJ_LINK_SCREEN_BANDS] = {0}; le32(q, 0x3FFFFu); q[sizeof q - 1] = 200;   /* all forced: the page's first look */
+      assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q, 0) == LSDJ_LINK_OK && rn == 6u + 2u * (4u + 2u * LSDJ_LINK_SCREEN_BANDS + 4u) + 1u);
+      assert(rd32(0) == 4242 && rd32(4 + 2 * LSDJ_LINK_SCREEN_BANDS) == 0x3FFFFu && stream_bands == 0x3FFFFu && stream_round == 200);
+      le32(q, 0); for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) { q[4 + 2 * b] = (uint8_t)rd(4 + 2 * b); q[5 + 2 * b] = (uint8_t)rd(5 + 2 * b); }
+      assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q, 0) == LSDJ_LINK_OK && rd32(4 + 2 * LSDJ_LINK_SCREEN_BANDS) == 0 && stream_bands == 0);   /* the same: nothing */
+      pic[17 * 8 * LSDJ_LINK_SCREEN_W + 7 * LSDJ_LINK_SCREEN_W + 159] = 0xF800u;   /* the last pixel: band 17 only */
+      le32(q, 1u << 2);   /* and band 2 forced */
+      assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q, 0) == LSDJ_LINK_OK && stream_bands == (1u << 17 | 1u << 2));
+      /* rows: 4 colours = 2 bits a pixel (57 bytes + 7), one colour = no indices, 16 colours */
+      uint8_t m[LSDJ_LINK_REPLY_MAX]; uint16_t px[LSDJ_LINK_SCREEN_W]; unsigned status;
+      uint32_t most = 0;
+      for (unsigned y = 0; y < LSDJ_LINK_SCREEN_H; y++) {
+          uint32_t n = lsdj_link_screen_pixels(pic, y, 99, m);
+          assert(unpixels(m, n, px, &status) == (int)y && status == 0 && !memcmp(px, pic + y * LSDJ_LINK_SCREEN_W, sizeof px));
+          if (n > most) most = n;
+      }
+      assert(most == 7u + (8u + 4u + 5u * 16u + 160u * 3u + 6u) / 7u + 1u);   /* row 143: 5 colours, 3 bits */
+      assert(lsdj_link_screen_pixels(pic, 0, 99 | 128, m) == 7u + (8u + 4u + 4u * 16u + 320u + 6u) / 7u + 1u);
+      for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) pic[3 * LSDJ_LINK_SCREEN_W + x] = 0x1234u;
+      { uint32_t n = lsdj_link_screen_pixels(pic, 3, 99 | 128, m); assert(n == 7u + 4u + 1u && unpixels(m, n, px, &status) == 3 && px[99] == 0x1234u); }
+      for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) pic[4 * LSDJ_LINK_SCREEN_W + x] = (uint16_t)((x * 3u % 16u) * 0x1111u);
+      { uint32_t n = lsdj_link_screen_pixels(pic, 4, 99 | 128, m); assert(n == 7u + (8u + 4u + 256u + 640u + 6u) / 7u + 1u && n <= 138u);
+        assert(unpixels(m, n, px, &status) == 4 && status == 0 && !memcmp(px, pic + 4 * LSDJ_LINK_SCREEN_W, sizeof px)); }
+      pic[4 * LSDJ_LINK_SCREEN_W + 5] = 0xBEEF;   /* 17 colours: status 2, the row only */
+      { uint32_t n = lsdj_link_screen_pixels(pic, 4, 99 | 128, m); assert(unpixels(m, n, px, &status) == 4 && status == 2 && n == 7u + 2u + 1u); }
+      { uint32_t n = lsdj_link_screen_pixels(pic, 143, 99 | 128, m); assert(unpixels(m, n, px, &status) == 143); }   /* row > 127: 8 bits */
+      /* refused: a link that cannot stream (Bluetooth), wrong length, firmware before FM-1_985 */
+      stream_ok = 0; stream_bands = 77; assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q, 0) == LSDJ_LINK_BAD && rn == 7 && stream_bands == 77); stream_ok = 1;
+      assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q - 1, 0) == LSDJ_LINK_BAD && req(LSDJ_LINK_SCREEN_SYNC, 0, 0, 0) == LSDJ_LINK_BAD);
+      lsdj_link_io_t io984 = io; io984.screen_stream = 0;
+      uint8_t w[4 + 2 * sizeof q] = {0x7d, 'G', 'S', LSDJ_LINK_SCREEN_SYNC};
+      for (unsigned i = 0; i < sizeof q; i++) { w[4 + 2 * i] = q[i] & 127; w[5 + 2 * i] = q[i] >> 7; }
+      rn = lsdj_link_handle(&st, &io984, w, sizeof w, 0, reply); assert(reply[5] == LSDJ_LINK_BAD);
+      rn = lsdj_link_handle(&st, &io_old, w, sizeof w, 0, reply); assert(reply[5] == LSDJ_LINK_BAD);
+      w[3] = LSDJ_LINK_SCREEN_PIXELS; rn = lsdj_link_handle(&st, &io, w, 4, 0, reply); assert(reply[5] == LSDJ_LINK_BAD); }   /* never asked */
     /* Junk */
     assert(req(0x7E, 0, 0, 0) == LSDJ_LINK_BAD);
     assert(req(LSDJ_LINK_INFO, (const uint8_t[1]){1}, 1, 0) == LSDJ_LINK_BAD);
     { uint8_t q[4] = {0x7d, 'G', 'D', 1}; assert(!lsdj_link_match(q, 4)); }
-    puts("PASS: web link: info, song export/import (crc, flash, order, timeout), settings, effects, theme, store, live, screen");
+    puts("PASS: web link: info, song export/import (crc, flash, order, timeout), settings, effects, theme, store, live, screen, screen sync");
     return 0;
 }

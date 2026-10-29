@@ -2,11 +2,11 @@
 /* Effects controls. KNOB 1-4 always play the four effects of the current page;
    the SELECT knob turns the pages. Each change pops up four bars (one per knob,
    lined up under LSDj's four channel columns: firmware/lsdj_overlay.h).
-   FM-1_981: FX opens the panel and keeps it open until FX is pressed again (a knob or
-   SELECT also pops it up for a moment). SELECT goes through one list: the channel pages
-   FILTER, DRIVE, LFO, LO-FI (each channel sends to the shared echo from FILTER K2, next to
-   its FX on/off), then the master pages MASTER (ALL FX, COMP, echo MIX and TIME), ECHO,
-   ECHO MOD, with a channel strip: C4-F4 mute PU1 PU2 WAV NOI.
+   FM-1_982: FX opens the panel on the channel pages FILTER, DRIVE, LFO, LO-FI (each channel
+   sends to the shared echo from FILTER K2, next to its FX on/off); FX again: the master
+   pages MASTER (ALL FX, COMP, echo MIX and TIME), ECHO, ECHO MOD, with a channel strip:
+   C4-F4 mute PU1 PU2 WAV NOI; FX a third time closes it (a knob or SELECT also pops the
+   panel up for a moment). SELECT turns the pages of the list shown.
    SELECT stops at the first and last page (PAGE WRAP on: it goes round).
    Per-channel effects act on the target: the channel under LSDj's cursor by
    default. Packs the setup into 17 32-bit words for the save store (11 before
@@ -63,21 +63,22 @@ typedef struct {
     uint8_t target;          /* 0..3 one channel, LSDJ_FX_ALL, LSDJ_FX_CURSOR */
     uint8_t cursor_ch;       /* board: LSDj's cursor channel 0..3, else (unknown) 0xFF */
     uint8_t page;            /* the page shown (FX_PAGE_*) */
+    uint8_t chpage;          /* the channel page last shown (back to it from the master pages) */
     uint8_t channels;        /* KNOBS = CHANNELS (lsdj_feat.h): K1-K4 = PU1 PU2 WAV NOI, see below */
-    uint8_t param;           /* ... the effect on them (0..LSDJ_FX_CHPARAMS-1), or a master page (LSDJ_FX_CHPARAMS + 0..2) */
+    uint8_t param;           /* ... the effect on them (0..LSDJ_FX_CHPARAMS-1) */
 } lsdj_fx_ui_t;
 
 static void lsdj_fx_ui_init(lsdj_fx_ui_t *u) {
-    u->target = LSDJ_FX_CURSOR; u->cursor_ch = 0xFF; u->page = FX_PAGE_FILTER; u->channels = 0; u->param = 0;
+    u->target = LSDJ_FX_CURSOR; u->cursor_ch = 0xFF; u->page = u->chpage = FX_PAGE_FILTER; u->channels = 0; u->param = 0;
 }
-/* FM-1_981: one list of pages, in SELECT order: the channel pages, then the master pages
-   (MASTER and the shared echo). The FX button opens / closes the panel (977-980: hold FX
-   for the master pages). */
+/* The pages in order: the channel pages (the first four), then the master pages (MASTER and
+   the shared echo). FM-1_982: two lists, SELECT turns the pages of the one shown (981: one
+   list of all seven; 977-980: hold FX for the master pages). */
 #define LSDJ_FX_ORDER 7u
 static const uint8_t lsdj_fx_order[LSDJ_FX_ORDER] = {FX_PAGE_FILTER, FX_PAGE_DRIVE, FX_PAGE_LFO, FX_PAGE_LOFI,
                                                     FX_PAGE_MASTER, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD};
 #define LSDJ_FX_CHANNEL_PAGES 4u   /* the first four of them */
-static const char lsdj_fx_order_letters[] = "1234567";   /* the screen map */
+static const char *const lsdj_fx_list_letters[2] = {"1234", "123"};   /* the screen map, per list */
 static int lsdj_fx_is_master(unsigned p) { return p == FX_PAGE_MASTER || p == FX_PAGE_ECHO || p == FX_PAGE_ECHO_MOD; }
 static unsigned lsdj_fx_index(unsigned p) {   /* its place in the list */
     for (unsigned i = 0; i < LSDJ_FX_ORDER; i++) if (lsdj_fx_order[i] == p) return i;
@@ -89,17 +90,26 @@ static unsigned lsdj_fx_cur(const lsdj_fx_ui_t *u) { return u->page % LSDJ_FX_PA
 static int lsdj_fx_on_master(const lsdj_fx_ui_t *u) { return lsdj_fx_is_master(lsdj_fx_cur(u)); }
 /* ---------- KNOBS = CHANNELS ----------
    The channel pages become one effect at a time on all four channels: K1 PU1, K2 PU2,
-   K3 WAV, K4 NOI. SELECT goes through the per-channel effects in page order, then the
-   master pages as usual (u->param 14..16). u->page follows: the page the effect is on
-   (the screen map and the web page show it). */
+   K3 WAV, K4 NOI. SELECT goes through the per-channel effects in page order (the master
+   pages as usual). u->page follows: the page the effect is on (the screen map and the web
+   page show it). */
 #define LSDJ_FX_CHPARAMS 14u
 static const uint8_t lsdj_fx_chparam[LSDJ_FX_CHPARAMS] = {FXK_FXON, FXK_SEND, FXK_CUTOFF, FXK_RESO, FXK_DRIVE, FXK_DIST, FXK_WARM,
     FXK_LFO_RATE, FXK_LFO_DEPTH, FXK_LFO_SHAPE, FXK_LFO_DEST, FXK_CRUSH, FXK_DECIM, FXK_TYPE};
-static int lsdj_fx_chmode(const lsdj_fx_ui_t *u) { return u->channels && u->param < LSDJ_FX_CHPARAMS; }
-/* Its place in the list (0..), and the list's length. */
-static unsigned lsdj_fx_pos(const lsdj_fx_ui_t *u) { return u->channels ? u->param : lsdj_fx_index(lsdj_fx_cur(u)); }
+static int lsdj_fx_chmode(const lsdj_fx_ui_t *u) { return u->channels && !lsdj_fx_on_master(u); }
+/* Its place in its list (0..), and the list's length. */
+static unsigned lsdj_fx_pos(const lsdj_fx_ui_t *u) {
+    if (lsdj_fx_on_master(u)) return lsdj_fx_index(lsdj_fx_cur(u)) - LSDJ_FX_CHANNEL_PAGES;
+    return u->channels ? u->param % LSDJ_FX_CHPARAMS : lsdj_fx_index(lsdj_fx_cur(u));
+}
 static unsigned lsdj_fx_count(const lsdj_fx_ui_t *u) {
-    return u->channels ? LSDJ_FX_CHPARAMS + (LSDJ_FX_ORDER - LSDJ_FX_CHANNEL_PAGES) : LSDJ_FX_ORDER;
+    return lsdj_fx_on_master(u) ? LSDJ_FX_ORDER - LSDJ_FX_CHANNEL_PAGES : u->channels ? LSDJ_FX_CHPARAMS : LSDJ_FX_CHANNEL_PAGES;
+}
+/* FX: the master pages (from MASTER), or back to the channel page last shown. */
+static void lsdj_fx_master(lsdj_fx_ui_t *u, int on) {
+    if (on == lsdj_fx_on_master(u)) return;
+    if (on) { u->chpage = u->page; u->page = FX_PAGE_MASTER; }
+    else u->page = lsdj_fx_is_master(u->chpage) ? FX_PAGE_FILTER : u->chpage;
 }
 /* The effect on knob k, and the setup it plays on (KNOBS = CHANNELS: channel k). */
 static unsigned lsdj_fx_knob(const lsdj_fx_ui_t *u, unsigned k) {
@@ -308,14 +318,13 @@ static void lsdj_fx_page_turn(lsdj_fx_ui_t *u, int steps, int wrap) {
     int n = (int)lsdj_fx_count(u), i = (int)lsdj_fx_pos(u) + steps;
     if (wrap) { i %= n; if (i < 0) i += n; }
     else i = i < 0 ? 0 : i >= n ? n - 1 : i;
-    if (u->channels) {   /* KNOBS = CHANNELS: the effect, and the page it is on; then the master pages */
+    if (lsdj_fx_on_master(u)) { u->page = lsdj_fx_order[LSDJ_FX_CHANNEL_PAGES + (unsigned)i]; return; }
+    if (u->channels) {   /* KNOBS = CHANNELS: the effect, and the page it is on */
         u->param = (uint8_t)i;
-        if (i >= (int)LSDJ_FX_CHPARAMS) { u->page = lsdj_fx_order[LSDJ_FX_CHANNEL_PAGES + (unsigned)i - LSDJ_FX_CHPARAMS]; return; }
         for (unsigned p = FX_PAGE_FILTER; p <= FX_PAGE_LOFI; p++)
             for (unsigned k = 0; k < 4; k++) if (lsdj_fx_page_knob[p][k] == lsdj_fx_chparam[i]) u->page = (uint8_t)p;
-        return;
-    }
-    u->page = lsdj_fx_order[i];
+    } else u->page = lsdj_fx_order[i];
+    u->chpage = u->page;
 }
 
 /* Discrete modes are choices, never amounts. Keep the same short names in the
@@ -458,7 +467,7 @@ static int lsdj_fx_unpack_n(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const uint32_t *w, u
     fx->p.bypass = bypass;
     (void)target;   /* the effects always follow LSDj's cursor now (a saved lock was easy to set by accident) */
     if (lsdj_fx_is_master(page)) page = FX_PAGE_FILTER;   /* opens on FILTER */
-    fx->p.fx_off = off; u->target = LSDJ_FX_CURSOR; u->page = (uint8_t)(page % LSDJ_FX_PAGES);
+    fx->p.fx_off = off; u->target = LSDJ_FX_CURSOR; u->page = u->chpage = (uint8_t)(page % LSDJ_FX_PAGES);
     lsdj_fx_update(fx);
     return 1;
 }

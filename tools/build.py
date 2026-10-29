@@ -4,7 +4,7 @@ from pathlib import Path
 from diagnostic import make_rom
 from prepare_apu import prepare
 ROOT=Path(__file__).resolve().parents[1]
-LSDJ_SLOT_PRODUCT='FM-1_981'
+LSDJ_SLOT_PRODUCT='FM-1_982'
 DEFAULT_ZIG=ROOT.parent/'Felucca/Felucca-website/build/wasm-tools/ziglang/zig.exe'
 # JieLi toolchain: $JIELI_TOOLCHAIN, else ~/.jieli/toolchain (Dinghy's get_toolchain.sh), else the upstream path.
 DEFAULT_TC=next((str(p) for p in [Path.home()/'.jieli/toolchain'] if p.is_dir()),

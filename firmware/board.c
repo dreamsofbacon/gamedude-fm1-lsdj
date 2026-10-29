@@ -337,8 +337,9 @@ static lsdj_fx_t fx;
 static lsdj_fx_ui_t fxu;
 static uint8_t fx_echo[LSDJ_FX_ECHO_LEN] __attribute__((section(".pool"),aligned(4)));
 static void fx_hook(const int16_t *s,int32_t *l,int32_t *r){lsdj_fx_mix(&fx,s,l,r);}   /* audio interrupt */
-/* FX button (FM-1_981): opens the effects panel and keeps it open until pressed again.
-   On a master page (MASTER, ECHO, ECHO MOD) the channel strip: C4-F4 mute, lsdj_fx_hold_keys. */
+/* FX button (FM-1_982): opens the effects panel on the channel pages; again: the master pages
+   (MASTER, ECHO, ECHO MOD: the channel strip, C4-F4 mute, lsdj_fx_hold_keys); again: closed.
+   The panel stays open meanwhile. */
 static uint8_t fx_open;
 static uint32_t fx_keys_prev;
 /* Where LSDj keeps the channel under its cursor (kept on the CHAIN and PHRASE
@@ -792,7 +793,7 @@ static void native_draw(void){
         else lsdj_fx_names(&fxu,names);
         lsdj_nat_bars(&n,&bars,ft->accent);
         if(!own){
-            lsdj_nat_pagemap(&n,lsdj_fx_order_letters,lsdj_fx_index(lsdj_fx_cur(&fxu)));   /* the pages, in the screen map */
+            lsdj_nat_pagemap(&n,lsdj_fx_list_letters[lsdj_fx_on_master(&fxu)?1:0],lsdj_fx_chmode(&fxu)?lsdj_fx_cur(&fxu)-FX_PAGE_FILTER:lsdj_fx_pos(&fxu));   /* the list's pages, in the screen map */
             if(feat.v[LSDJ_FEAT_BATTERY])lsdj_nat_battery(&n,17,15,battery_level());   /* BATTERY: after "FX" */
         }
         lsdj_nat_names(&n,(const char(*)[7])names,bars.hot);
@@ -1264,12 +1265,13 @@ void gb_cstart(const uint32_t *parameters){
             if(panel&~prev_panel&(1u<<SEQ_BUTTON))seq_button();
             if(songrow_addr&&((panel^prev_panel)&(1u<<ARP_BUTTON)))cue_button((panel>>ARP_BUTTON)&1u);
             if((panel^prev_panel)&(1u<<EDIT_BUTTON))tempo_button((panel>>EDIT_BUTTON)&1u);
-            if(panel&~prev_panel&(1u<<FX_BUTTON)&&!menu.open){   /* FX: the panel open / closed */
-                if(fx_open){fx_open=0;bars.until_ms=0;}
-                else{fx_open=1;fx_bars_show(-1);}
+            if(panel&~prev_panel&(1u<<FX_BUTTON)&&!menu.open){   /* FX: channel pages, master pages, closed */
+                if(!fx_open){fx_open=1;lsdj_fx_master(&fxu,0);fx_bars_show(-1);}
+                else if(!lsdj_fx_on_master(&fxu)){lsdj_fx_master(&fxu,1);fx_bars_show(-1);}
+                else{fx_open=0;lsdj_fx_master(&fxu,0);bars.until_ms=0;}
             }
             if(panel&~prev_panel&(1u<<GLO_BUTTON)){
-                if(!menu.open){lsdj_menu_open(&menu);fx_open=0;bars.until_ms=0;}   /* the effects panel goes */
+                if(!menu.open){lsdj_menu_open(&menu);fx_open=0;lsdj_fx_master(&fxu,0);bars.until_ms=0;}   /* the effects panel goes */
                 else{
                     menu.open=0;
                     if(menu.changed){   /* keep them: a 16-byte record, the emulator parked meanwhile */

@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_981). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_982). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -12,7 +12,7 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 
 # GameDude - FM-1 / SMK37 — v2.0
 
-## LSDj Burrito: autosave, FX panel toggle, echo on the master pages (FM-1_981)
+## LSDj Burrito: master pages apart from the channel pages, autosave (FM-1_982)
 
 - **FILTER K2 is the echo send**, next to K1 Channel FX; the filter type moved to
   LO-FI K3. Save words, link and MIDI CCs are unchanged (the knob layout is not in
@@ -138,9 +138,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_981 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_982 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_981 for alpha 81).
+Normal ROM builds use the current alpha identity (FM-1_982 for alpha 82).
 
 From this repository in WSL:
 

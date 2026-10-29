@@ -12,7 +12,7 @@
    PAGE LIGHTS  OFF / ON         black keys light up for the FX page / LSDj screen
    MODE LIGHTS  OFF / ON         a light sweep on entering note / button mode
    BATTERY      OFF / ON         battery level in the FX panel and settings
-   FX THEME     MATCH / a theme  the FX panel's colours (MATCH: LSDj's theme)
+   FX THEME     MATCH / a theme  the FX panel's colours (MATCH: LSDj's theme); FM-1_980: on SETTINGS / DISPLAY, under THEME
 
    Packed: 'F' (0x46) in bits 24-31. Pure logic: tests/lsdj_feat.c. */
 #pragma once

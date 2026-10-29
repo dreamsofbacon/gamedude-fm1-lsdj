@@ -60,9 +60,14 @@ enum { LSDJ_SET_KNOBS, LSDJ_SET_PRESETS_DIR, LSDJ_SET_ALGO_DIR, LSDJ_SET_PLAYREC
 
 typedef struct {
     uint8_t open, cursor, changed, page;   /* page: LSDJ_PAGE_* (the top, or a category) */
+    uint8_t settle;   /* frames of knob stillness still needed after a knob opened a page (or went BACK) */
 } lsdj_menu_t;
+/* FM-1_980: the rest of the knob turn that opens a page must not change its first
+   setting (it switched PAGE WRAP on). Knob clicks are ignored until the knobs have
+   been still this many frames (~1/4 s); a click meanwhile starts the wait again. */
+#define LSDJ_MENU_SETTLE 15u
 
-static void lsdj_menu_open(lsdj_menu_t *m) { m->open = 1; m->changed = 0; m->page = 0; m->cursor = 0; }
+static void lsdj_menu_open(lsdj_menu_t *m) { m->open = 1; m->changed = 0; m->page = 0; m->cursor = 0; m->settle = 0; }
 
 static unsigned lsdj_set_get(const lsdj_settings_t *s, unsigned item) {
     switch (item) {
@@ -135,7 +140,7 @@ static unsigned lsdj_menu_entries(unsigned page, uint8_t e[LSDJ_MENU_MAX]) {
     static const uint8_t top[] = {LSDJ_MENU_CAT(LSDJ_PAGE_CONTROLS), LSDJ_MENU_CAT(LSDJ_PAGE_DISPLAY), LSDJ_MENU_CAT(LSDJ_PAGE_MIDI),
                                   LSDJ_MENU_CAT(LSDJ_PAGE_FEAT)};
     static const uint8_t controls[] = {LSDJ_MENU_BACK, LSDJ_SET_KNOBS, LSDJ_SET_PRESETS_DIR, LSDJ_SET_ALGO_DIR, LSDJ_SET_PLAYREC, LSDJ_SET_SELKEY};
-    static const uint8_t display[] = {LSDJ_MENU_BACK, LSDJ_SET_THEME, LSDJ_SET_POPUP, LSDJ_SET_METER};
+    static const uint8_t display[] = {LSDJ_MENU_BACK, LSDJ_SET_THEME, LSDJ_MENU_FEAT(LSDJ_FEAT_THEME), LSDJ_SET_POPUP, LSDJ_SET_METER};   /* FX THEME under THEME */
     unsigned n = 0;
     switch (page) {
     case LSDJ_PAGE_CONTROLS: for (unsigned i = 0; i < sizeof controls; i++) e[n++] = controls[i]; break;
@@ -147,7 +152,7 @@ static unsigned lsdj_menu_entries(unsigned page, uint8_t e[LSDJ_MENU_MAX]) {
         break;
     case LSDJ_PAGE_FEAT:
         e[n++] = LSDJ_MENU_BACK;
-        for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++) e[n++] = (uint8_t)LSDJ_MENU_FEAT(i);
+        for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++) if (i != LSDJ_FEAT_THEME) e[n++] = (uint8_t)LSDJ_MENU_FEAT(i);   /* FX THEME: on DISPLAY */
         break;
     default: for (unsigned i = 0; i < sizeof top; i++) e[n++] = top[i]; break;
     }
@@ -170,11 +175,14 @@ static int lsdj_menu_knobs(lsdj_menu_t *m, lsdj_settings_t *s, lsdj_midi_t *mi, 
     uint8_t it = e[m->cursor];
     /* on THEME and FX THEME, K2 jumps 8 themes a click (there are many) */
     int st = (int)steps[0] + (int)steps[1] * (it == LSDJ_SET_THEME || it == LSDJ_MENU_FEAT(LSDJ_FEAT_THEME) ? 8 : 1) + (int)steps[2] + (int)steps[3];
+    if (m->settle) { m->settle = (uint8_t)(steps[0] || steps[1] || steps[2] || steps[3] ? LSDJ_MENU_SETTLE : m->settle - 1u); return 0; }
     if (!st) return 0;
     if (it == LSDJ_MENU_BACK) {   /* back to the top, on the category we came from */
-        m->cursor = (uint8_t)(m->page - 1u); m->page = LSDJ_PAGE_TOP; return 0;
+        m->cursor = (uint8_t)(m->page - 1u); m->page = LSDJ_PAGE_TOP; m->settle = LSDJ_MENU_SETTLE; return 0;
     }
-    if (it >= LSDJ_MENU_CAT(0)) { m->page = (uint8_t)(it - LSDJ_MENU_CAT(0)); m->cursor = 1; return 0; }   /* open: on its first setting */
+    if (it >= LSDJ_MENU_CAT(0)) {   /* open: on its first setting */
+        m->page = (uint8_t)(it - LSDJ_MENU_CAT(0)); m->cursor = 1; m->settle = LSDJ_MENU_SETTLE; return 0;
+    }
     if (it >= LSDJ_MENU_FEAT(0)) { if (lsdj_feat_turn(f, it - LSDJ_MENU_FEAT(0), st)) { m->changed = 1; return 3; } return 0; }
     if (it >= LSDJ_MENU_MIDI(0)) { if (lsdj_midi_turn(mi, it - LSDJ_MENU_MIDI(0), st)) { m->changed = 1; return 2; } return 0; }
     if (lsdj_set_turn(s, it, st)) { m->changed = 1; return 1; }

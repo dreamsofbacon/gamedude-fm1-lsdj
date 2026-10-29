@@ -29,7 +29,7 @@ static void check_bars(void) { check_bars_of(&fx, &u); }
 int main(int argc, char **argv) {
     lsdj_fx_init(&fx, echo); lsdj_fx_ui_init(&u); lsdj_fx_update(&fx);
     assert(!fx.active && u.target == LSDJ_FX_CURSOR && u.page == FX_PAGE_FILTER && u.mpage == FX_PAGE_MASTER && !u.held);
-    /* Every effect once; unused knobs are blank and inert. */
+    /* Every effect once (FM-1_980: echo MIX and TIME also on MASTER); unused knobs are blank and inert. */
     { int seen[FXK_COUNT] = {0};
       for (unsigned p = 0; p < LSDJ_FX_PAGES; p++) for (unsigned k = 0; k < 4; k++) {
           unsigned e = lsdj_fx_page_knob[p][k];
@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
           lsdj_fx_bars(&fx, &u, (int)k, title, big, label, value, caption, level);
           assert(!label[k][0] && !value[k][0] && !caption[k][0] && !level[k]);
       }
-      for (unsigned k = 0; k < FXK_COUNT; k++) assert(seen[k] == 1);
+      for (unsigned k = 0; k < FXK_COUNT; k++) assert(seen[k] == (k == FXK_ECHO_MIX || k == FXK_ECHO_TIME ? 2 : 1));
       assert(sizeof lsdj_fx_page_letters == LSDJ_FX_PAGES + 1); }
 
     /* MASTER: the switch is independent of the cursor, preserves channel bypass and all values. */
@@ -56,6 +56,13 @@ int main(int argc, char **argv) {
     }
     turn(1, 30); assert(fx.p.comp == 60 && fx.active);
     check_bars(); fx.p.comp = 0; lsdj_fx_update(&fx);
+    {   /* FM-1_980: K3 / K4 = the shared echo's MIX and TIME, the same values as the ECHO page */
+        uint8_t mix = fx.p.m[FXM_MIX], tm = fx.p.m[FXM_TIME], sync = fx.p.m[FXM_SYNC];
+        fx.p.m[FXM_SYNC] = 0;
+        turn(2, 5); assert(fx.p.m[FXM_MIX] == lsdj_fx_clamp127(mix + 10));
+        turn(3, -3); assert(fx.p.m[FXM_TIME] == lsdj_fx_clamp127((int)tm - 6));
+        check_bars();
+        fx.p.m[FXM_MIX] = mix; fx.p.m[FXM_TIME] = tm; fx.p.m[FXM_SYNC] = sync; lsdj_fx_update(&fx); }
     /* FILTER: Channel FX, echo send (979: next to FX on/off), cutoff, resonance. */
     u.page = FX_PAGE_FILTER; u.cursor_ch = 2;
     assert(lsdj_fx_page_knob[FX_PAGE_FILTER][0] == FXK_FXON && lsdj_fx_page_knob[FX_PAGE_FILTER][1] == FXK_SEND);

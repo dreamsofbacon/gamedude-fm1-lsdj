@@ -9,6 +9,10 @@
 #include "lsdj_overlay.h"
 static lsdj_midi_t mi = {LSDJ_CLK_ALL, 1, 0, 0, 0, 0, 0};
 static lsdj_feat_t fe;   /* the feature switches (FX+LIGHTS): defaults, set in main */
+static void still(lsdj_menu_t *m) {   /* knobs left still after opening a page / BACK */
+    lsdj_settings_t s0; const int32_t no[4] = {0, 0, 0, 0};
+    while (m->settle) assert(lsdj_menu_knobs(m, &s0, &mi, &fe, no, 0) == 0);
+}
 
 static uint16_t scr[LSDJ_OV_W * LSDJ_OV_H];
 static void ppm(const char *dir, const char *name) {
@@ -70,19 +74,26 @@ int main(int argc, char **argv) {
     assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && m.page == LSDJ_PAGE_FEAT && m.cursor == 1);
     assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_WRAP));
     {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l);
-        assert(cnt == LSDJ_FEAT_ITEMS + 3u && !strcmp(l[0], "SETTINGS/FX+LIGHTS") && !strcmp(l[2], "PAGE WRAP: OFF"));
-        assert(!strcmp(l[3], "GREY MUTED: ON") && !strcmp(l[7], "KNOBS: PARAMS") && !strcmp(l[11], "FX THEME: MATCH")); }
+        /* FM-1_980: FX THEME is on DISPLAY (under THEME), not here */
+        assert(cnt == LSDJ_FEAT_ITEMS + 2u && !strcmp(l[0], "SETTINGS/FX+LIGHTS") && !strcmp(l[2], "PAGE WRAP: OFF"));
+        assert(!strcmp(l[3], "GREY MUTED: ON") && !strcmp(l[7], "KNOBS: PARAMS") && !strcmp(l[10], "BATTERY: ON")); }
+    /* FM-1_980: the rest of the turn that opened the page changes nothing (it switched PAGE WRAP on);
+       a click while waiting starts the wait again */
+    for (unsigned i = 0; i + 1u < LSDJ_MENU_SETTLE; i++) assert(lsdj_menu_knobs(&m, &s, &mi, &fe, no, 0) == 0);
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && fe.v[LSDJ_FEAT_WRAP] == 0 && !m.changed);
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && fe.v[LSDJ_FEAT_WRAP] == 0 && m.settle == LSDJ_MENU_SETTLE);
+    still(&m);
     assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 3 && fe.v[LSDJ_FEAT_WRAP] == 1 && m.changed);
     assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0);                                   /* ON: at the end */
-    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_THEME));
-    { int32_t s2[4] = {0, 1, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 3 && fe.v[LSDJ_FEAT_THEME] == 8); }   /* K2: 8 */
-    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "K1 NEXT  K2 JUMP 8")); }
-    { int32_t s2[4] = {-99, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); assert(fe.v[LSDJ_FEAT_THEME] == 0); }
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_BATTERY));   /* the last line */
     lsdj_feat_defaults(&fe); m.changed = 0;
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, -99); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0);  /* BACK: on FX+LIGHTS */
     assert(m.page == LSDJ_PAGE_TOP && m.cursor == 3);
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && m.page == LSDJ_PAGE_TOP);   /* the same turn does not reopen it */
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); assert(m.cursor == 2);                       /* MIDI */
+    still(&m);
     assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && m.page == LSDJ_PAGE_MIDI && m.cursor == 1 && !m.changed);
+    still(&m);
     {   char l[LSDJ_MENU_LINES][20]; lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[0], "SETTINGS/MIDI") && !strcmp(l[1], "BACK")); }
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_SET_BT);   /* the last line: BLUETOOTH */
     { int32_t s2[4] = {5, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 1 && s.bluetooth == LSDJ_SET_BT_MODES - 1u); }
@@ -94,24 +105,35 @@ int main(int argc, char **argv) {
     {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "K1=BACK  GLO=CLOSE")); }
     { int32_t s2[4] = {0, 0, -1, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); }            /* any knob, either way */
     assert(m.page == LSDJ_PAGE_TOP && m.cursor == 2);                                  /* back on MIDI */
-    /* DISPLAY: THEME (K2 jumps 8), POPUP TIME, CPU METER */
+    still(&m);
+    /* DISPLAY: THEME (K2 jumps 8), FX THEME (FM-1_980: right under THEME), POPUP TIME, CPU METER */
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0);
     assert(m.page == LSDJ_PAGE_DISPLAY && lsdj_menu_entry(&m) == LSDJ_SET_THEME);
+    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l);
+        assert(cnt == 7u && !strcmp(l[0], "SETTINGS/DISPLAY") && !strncmp(l[2], "THEME: ", 7) && !strcmp(l[3], "FX THEME: MATCH")); }
+    still(&m);
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 1); assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_THEME));
+    { int32_t s2[4] = {0, 1, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 3 && fe.v[LSDJ_FEAT_THEME] == 8); }   /* K2: 8 */
+    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "K1 NEXT  K2 JUMP 8")); }
+    { int32_t s2[4] = {-99, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); assert(fe.v[LSDJ_FEAT_THEME] == 0); }
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1);
     { int32_t s2[4] = {3, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.theme == 3); }   /* THEME: one per click */
     { int32_t s2[4] = {0, 2, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.theme == 19); }   /* K2: 8 a click */
     { int32_t s2[4] = {0, 99, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); assert(s.theme == LSDJ_SET_THEMES - 1u); }   /* stops at the end */
     {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "K1 NEXT  K2 JUMP 8")); }
     { int32_t s2[4] = {-99, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); s2[0] = 3; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); assert(s.theme == 3); }
-    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 1); assert(lsdj_menu_entry(&m) == LSDJ_SET_POPUP);   /* POPUP TIME: 1.5 3 5 10 s */
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 2); assert(lsdj_menu_entry(&m) == LSDJ_SET_POPUP);   /* past FX THEME */   /* POPUP TIME: 1.5 3 5 10 s */
     { int32_t s2[4] = {9, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.popup == LSDJ_SET_POPUPS - 1u); }
     { char l[20]; lsdj_set_line(&s, LSDJ_SET_POPUP, l); assert(!strcmp(l, "POPUP TIME: 10S")); }
     { lsdj_settings_t r; assert(lsdj_set_unpack(lsdj_set_pack(&s), &r) && r.popup == 3 && lsdj_set_popup_ms[r.popup] == 10000u); }
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, 1); assert(lsdj_menu_entry(&m) == LSDJ_SET_METER);
     { int32_t s2[4] = {0, 1, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.meter == 1); }
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, -9); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0); assert(m.page == LSDJ_PAGE_TOP && m.cursor == 1);
+    still(&m);
     /* CONTROLS */
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0);
     assert(m.page == LSDJ_PAGE_CONTROLS && lsdj_menu_entry(&m) == LSDJ_SET_KNOBS);
+    still(&m);
     assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) && s.knobs_swapped == 1 && m.changed);
     { int32_t st[4] = {0, 0, 3, 0}; assert(!lsdj_menu_knobs(&m, &s, &mi, &fe, st, 0) && s.knobs_swapped == 1); }   /* at the end */
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, 1);

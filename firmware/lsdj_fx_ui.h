@@ -4,7 +4,7 @@
    lined up under LSDj's four channel columns: firmware/lsdj_overlay.h).
    Tapping FX / SELECT shows the channel pages (FILTER, DRIVE, LFO, LO-FI, ECHO, ECHO MOD:
    the echo is shared, each channel sends to it from FILTER K2, next to its FX on/off);
-   holding FX shows MASTER, with a channel strip: C4-F4 mute PU1 PU2 WAV NOI.
+   holding FX shows MASTER (ALL FX, COMP, echo MIX and TIME), with a channel strip: C4-F4 mute PU1 PU2 WAV NOI.
    SELECT stops at the first and last page (PAGE WRAP on: it goes round).
    Per-channel effects act on the target: the channel under LSDj's cursor by
    default. Packs the setup into 17 32-bit words for the save store (11 before
@@ -38,7 +38,7 @@ static const char *const lsdj_fxk_label[FXK_COUNT + 1] = {   /* up to 6 characte
 #define LSDJ_FX_PAGES 7u
 enum { FX_PAGE_MASTER, FX_PAGE_FILTER, FX_PAGE_DRIVE, FX_PAGE_LFO, FX_PAGE_LOFI, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD };
 static const uint8_t lsdj_fx_page_knob[LSDJ_FX_PAGES][4] = {
-    {FXK_ALLON, FXK_COMP, FXK_NONE, FXK_NONE},
+    {FXK_ALLON, FXK_COMP, FXK_ECHO_MIX, FXK_ECHO_TIME},   /* FM-1_980: the echo mix and time here too (hold FX) */
     {FXK_FXON, FXK_SEND, FXK_CUTOFF, FXK_RESO},   /* FM-1_979: the echo send next to FX on/off */
     {FXK_DRIVE, FXK_DIST, FXK_WARM, FXK_NONE},
     {FXK_LFO_RATE, FXK_LFO_DEPTH, FXK_LFO_SHAPE, FXK_LFO_DEST},

@@ -912,9 +912,11 @@ static int lk_mute_set(uint8_t m,uint8_t f){   /* the web page's channel buttons
 }
 static uint32_t lk_feat_get(void){return lsdj_feat_pack(&feat);}
 static int lk_feat_set(uint32_t v){lsdj_feat_t t;if(!lsdj_feat_unpack(v,&t))return 0;feat=t;feat_apply();return 1;}
+/* The screen mirror: the 160x144 picture as last shown (native_draw drew the panels into it). */
+static const volatile uint16_t *lk_screen(uint32_t *shown){*shown=display_count;return gp_pixels();}
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,
-    lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set,lk_feat_get,lk_feat_set};
+    lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set,lk_feat_get,lk_feat_set,lk_screen};
 static int app_sysex_frame(const uint8_t *frame,uint32_t size){
     if(!lsdj_link_match(frame,size))return 0;
     static uint8_t reply[LSDJ_LINK_REPLY_MAX];

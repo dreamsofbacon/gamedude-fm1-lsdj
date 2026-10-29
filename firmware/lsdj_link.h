@@ -46,6 +46,12 @@
    op 0x24 MUTE_SET u8 mute (bit per channel), u8 freeze (0/1)   live only, never saved
    Cartridge export reads immutable application data only; never saves, arbitrary
    addresses, flash writes or pauses. Both operations refuse during save import.
+   The screen (FM-1_983+; status 1 before): the 160x144 picture the LCD shows, panels
+   included, read while it is drawn (a row may tear; the next read fixes it); read only:
+   op 0x25 SCREEN_INFO    -> u32 pictures shown, 18 x u16 hashes (one per 8-row band)
+   op 0x26 SCREEN_ROW u8 row (0..143) -> u8 row, u8 colours (1..16), colours x u16
+                             RGB565 (as the LCD), 80 bytes: pixel 2i low nibble,
+                             2i+1 high (colour indices); more than 16: status 2
    status 0 ok, 1 bad request, 2 wrong state, 3 crc mismatch, 4 flash error.
    An import with no CHUNK / COMMIT for LSDJ_LINK_TIMEOUT_MS is aborted.
    Pure logic, the hardware through lsdj_link_io_t: tests/lsdj_link.c. */
@@ -64,7 +70,11 @@ enum { LSDJ_LINK_INFO = 0x01, LSDJ_LINK_READ, LSDJ_LINK_BEGIN, LSDJ_LINK_CHUNK_O
        LSDJ_LINK_SETTINGS_GET = 0x10, LSDJ_LINK_SETTINGS_SET, LSDJ_LINK_FX_GET, LSDJ_LINK_FX_SET,
        LSDJ_LINK_THEME_GET, LSDJ_LINK_THEME_SET, LSDJ_LINK_STORE, LSDJ_LINK_MIDI_GET, LSDJ_LINK_MIDI_SET,
        LSDJ_LINK_FEAT_GET, LSDJ_LINK_FEAT_SET,
-       LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ, LSDJ_LINK_MUTE_SET };
+       LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ, LSDJ_LINK_MUTE_SET,
+       LSDJ_LINK_SCREEN_INFO, LSDJ_LINK_SCREEN_ROW };
+#define LSDJ_LINK_SCREEN_W     160u
+#define LSDJ_LINK_SCREEN_H     144u
+#define LSDJ_LINK_SCREEN_BANDS 18u   /* LSDj's character rows */
 #define LSDJ_LINK_BT_STATS 13u
 enum { LSDJ_LINK_OK = 0, LSDJ_LINK_BAD = 1, LSDJ_LINK_STATE = 2, LSDJ_LINK_CRC = 3, LSDJ_LINK_FLASH = 4 };
 
@@ -101,7 +111,16 @@ typedef struct {
     int (*mute_set)(uint8_t mute, uint8_t freeze);   /* 0 if not valid; NULL: not supported (status 1) */
     uint32_t (*feat_get)(void);                  /* the feature switches; NULL: not supported (status 1) */
     int (*feat_set)(uint32_t v);
+    const volatile uint16_t *(*screen)(uint32_t *shown); /* the 160x144 picture; NULL: not supported (status 1) */
 } lsdj_link_io_t;
+
+/* One band's hash (FNV-1a over the pixels, folded to 16 bits). */
+static uint16_t lsdj_link_band_hash(const volatile uint16_t *px, unsigned band) {
+    uint32_t h = 2166136261u;
+    const volatile uint16_t *p = px + band * 8u * LSDJ_LINK_SCREEN_W;
+    for (unsigned i = 0; i < 8u * LSDJ_LINK_SCREEN_W; i++) { h ^= p[i]; h *= 16777619u; }
+    return (uint16_t)(h ^ h >> 16);
+}
 
 typedef struct {
     uint8_t importing;
@@ -291,6 +310,33 @@ static uint32_t lsdj_link_handle(lsdj_link_t *s, const lsdj_link_io_t *io, const
     case LSDJ_LINK_MUTE_SET:
         if (!io->mute_set || !lsdj_link_unpack(args, an, d, 2) || !io->mute_set(d[0], d[1])) status = LSDJ_LINK_BAD;
         break;
+    case LSDJ_LINK_SCREEN_INFO: {
+        uint32_t shown = 0;
+        const volatile uint16_t *px = io->screen ? io->screen(&shown) : 0;
+        if (an || !px) { status = LSDJ_LINK_BAD; break; }
+        n = lsdj_link_put32(r, n, shown);
+        for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) n = lsdj_link_put16(r, n, lsdj_link_band_hash(px, b));
+        break;
+    }
+    case LSDJ_LINK_SCREEN_ROW: {
+        uint32_t shown;
+        const volatile uint16_t *px = io->screen ? io->screen(&shown) : 0;
+        if (!px || !lsdj_link_unpack(args, an, d, 1) || d[0] >= LSDJ_LINK_SCREEN_H) { status = LSDJ_LINK_BAD; break; }
+        uint16_t row[LSDJ_LINK_SCREEN_W], pal[16]; unsigned np = 0;
+        for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) row[x] = px[d[0] * LSDJ_LINK_SCREEN_W + x];   /* one copy: indices match the colours */
+        uint8_t *ix = d + 1;   /* 80 bytes (d holds 132) */
+        for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W && np <= 16u; x++) {
+            unsigned k = 0;
+            while (k < np && pal[k] != row[x]) k++;
+            if (k == np) { if (np == 16u) { np = 17u; break; } pal[np++] = row[x]; }
+            if (x & 1u) ix[x >> 1] |= (uint8_t)(k << 4); else ix[x >> 1] = (uint8_t)k;
+        }
+        if (np > 16u) { status = LSDJ_LINK_STATE; break; }
+        n = lsdj_link_put8(r, n, d[0]); n = lsdj_link_put8(r, n, (uint8_t)np);
+        for (unsigned k = 0; k < np; k++) n = lsdj_link_put16(r, n, pal[k]);
+        n = lsdj_link_put(r, n, ix, LSDJ_LINK_SCREEN_W / 2u);
+        break;
+    }
     case LSDJ_LINK_BT:
         if (an || !io->bt_stat) { status = LSDJ_LINK_BAD; break; }
         for (unsigned i = 0; i < LSDJ_LINK_BT_STATS; i++) n = lsdj_link_put32(r, n, io->bt_stat(i));

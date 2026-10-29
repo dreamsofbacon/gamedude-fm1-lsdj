@@ -44,9 +44,11 @@ static int io_mute(uint8_t m, uint8_t f) { if (m > 15 || f > 1) return 0; mute_n
 static uint32_t feat_word = 0x460001C6u;
 static uint32_t io_eget(void) { return feat_word; }
 static int io_eset(uint32_t v) { if (v >> 24 != 0x46) return 0; feat_word = v; return 1; }
+static uint16_t pic[LSDJ_LINK_SCREEN_W * LSDJ_LINK_SCREEN_H];
+static const volatile uint16_t *io_screen(uint32_t *shown) { *shown = 4242; return pic; }
 static const lsdj_link_io_t io = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
                                   io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute,
-                                  io_eget, io_eset};
+                                  io_eget, io_eset, io_screen};
 /* firmware before FM-1_979: no feature switches */
 static const lsdj_link_io_t io_old = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
                                       io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute};
@@ -188,10 +190,34 @@ int main(void) {
     { uint8_t m[2] = {5, 1}; assert(req(LSDJ_LINK_MUTE_SET, m, 2, 0) == LSDJ_LINK_OK && mute_now == 5 && freeze_now == 1);
       uint8_t bad[2] = {16, 0}; assert(req(LSDJ_LINK_MUTE_SET, bad, 2, 0) == LSDJ_LINK_BAD && mute_now == 5);
       assert(req(LSDJ_LINK_MUTE_SET, m, 1, 0) == LSDJ_LINK_BAD); }
+    /* SCREEN_INFO / SCREEN_ROW: the picture, band hashes, rows as colours + 4-bit indices */
+    { for (unsigned i = 0; i < LSDJ_LINK_SCREEN_W * LSDJ_LINK_SCREEN_H; i++) pic[i] = (uint16_t)(0x1000u * ((i / 7u) % 4u) + 0x0FFFu);
+      assert(req(LSDJ_LINK_SCREEN_INFO, 0, 0, 0) == LSDJ_LINK_OK && rn == 6u + 2u * (4u + 2u * LSDJ_LINK_SCREEN_BANDS) + 1u && rd32(0) == 4242);
+      uint16_t h[LSDJ_LINK_SCREEN_BANDS]; for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) h[b] = (uint16_t)rd16(4 + 2 * b);
+      pic[5 * 8 * LSDJ_LINK_SCREEN_W + 3 * LSDJ_LINK_SCREEN_W + 77] ^= 0x0101u;   /* one pixel in band 5 */
+      assert(req(LSDJ_LINK_SCREEN_INFO, 0, 0, 0) == LSDJ_LINK_OK);
+      for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) assert((rd16(4 + 2 * b) == h[b]) == (b != 5));
+      for (unsigned y = 0; y < LSDJ_LINK_SCREEN_H; y++) {
+          uint8_t a = (uint8_t)y; assert(req(LSDJ_LINK_SCREEN_ROW, &a, 1, 0) == LSDJ_LINK_OK && rd(0) == y);
+          unsigned np = rd(1); assert(np >= 1 && np <= 16 && rn == 6u + 2u * (2u + 2u * np + 80u) + 1u);
+          for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) {
+              unsigned k = (rd(2 + 2 * np + x / 2) >> (4 * (x & 1))) & 15u;
+              assert(k < np && rd16(2 + 2 * k) == pic[y * LSDJ_LINK_SCREEN_W + x]);
+          }
+      }
+      for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) pic[x] = (uint16_t)((x % 16u) * 0x111u);   /* 16 colours: still fine */
+      { uint8_t a = 0; assert(req(LSDJ_LINK_SCREEN_ROW, &a, 1, 0) == LSDJ_LINK_OK && rd(1) == 16); }
+      pic[16] = 0xBEEF; pic[17] = 0xBEEF;   /* 17: status 2, the page skips the row */
+      { uint8_t a = 0; assert(req(LSDJ_LINK_SCREEN_ROW, &a, 1, 0) == LSDJ_LINK_STATE); }
+      { uint8_t a = 144; assert(req(LSDJ_LINK_SCREEN_ROW, &a, 1, 0) == LSDJ_LINK_BAD); }
+      assert(req(LSDJ_LINK_SCREEN_ROW, 0, 0, 0) == LSDJ_LINK_BAD && req(LSDJ_LINK_SCREEN_INFO, (const uint8_t[1]){0}, 1, 0) == LSDJ_LINK_BAD);
+      uint8_t q[6] = {0x7d, 'G', 'S', LSDJ_LINK_SCREEN_INFO};   /* firmware before FM-1_983 */
+      rn = lsdj_link_handle(&st, &io_old, q, 4, 0, reply); assert(reply[5] == LSDJ_LINK_BAD);
+      q[3] = LSDJ_LINK_SCREEN_ROW; rn = lsdj_link_handle(&st, &io_old, q, 6, 0, reply); assert(reply[5] == LSDJ_LINK_BAD); }
     /* Junk */
     assert(req(0x7E, 0, 0, 0) == LSDJ_LINK_BAD);
     assert(req(LSDJ_LINK_INFO, (const uint8_t[1]){1}, 1, 0) == LSDJ_LINK_BAD);
     { uint8_t q[4] = {0x7d, 'G', 'D', 1}; assert(!lsdj_link_match(q, 4)); }
-    puts("PASS: web link: info, song export/import (crc, flash, order, timeout), settings, effects, theme, store, live");
+    puts("PASS: web link: info, song export/import (crc, flash, order, timeout), settings, effects, theme, store, live, screen");
     return 0;
 }

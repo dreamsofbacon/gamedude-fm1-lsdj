@@ -164,11 +164,16 @@ static void master_boot(void){
     /* ADC failure starts muted; a later successful conversion recovers. */
     master_gain=master_audio_gain=0;
 }
+/* The battery (FM1_ADC_BATT, PB1's divider), averaged slowly as Felucca does (a new reading
+   counts 1/32, every 100 ms); 0 = no reading yet. Felucca's thresholds: battery_level. */
+static int32_t batt_raw;
+static unsigned battery_level(void);   /* bars and USB power: after the USB driver (below) */
 static void master_poll(void){
-    static uint32_t last;
+    static uint32_t last;static uint8_t tenth;
     uint32_t now=fm1_ticks();if(now-last<240000u)return;last=now;
     int32_t raw=fm1_adc_read(FM1_ADC_MASTER);
     master_raw=raw;if(raw>=0)master_gain=gb_master_gain((uint32_t)raw);
+    if(++tenth>=10u){tenth=0;int32_t b=fm1_adc_read(FM1_ADC_BATT);if(b>0)batt_raw=batt_raw?batt_raw+(b-batt_raw)/32:b;}
 }
 static void recovery_tick(void);
 void gb_scan_irq(void){
@@ -255,9 +260,11 @@ static void piano_set(uint32_t lights){   /* key lights as given (bit k = key k)
     lights_held_prev=UINT32_MAX;
     piano_set2(lights,0);
 }
+static uint32_t page_light(void);   /* PAGE LIGHTS: a black key for the page (below) */
 static void piano_lights(uint32_t held_actions){
     if(held_actions!=lights_held_prev){lights_base=gp_fm1_key_lights(held_actions);lights_held_prev=held_actions;}
-    piano_set2(lights_base&~piano_soft,lights_base&piano_soft);
+    uint32_t page=page_light();
+    piano_set2(lights_base&~piano_soft&~page,(lights_base&piano_soft)|page);
 }
 static void input_init(void){
     fm1_input_init();
@@ -308,13 +315,17 @@ static lsdj_ov_t ov;
 static lsdj_settings_t settings;
 static lsdj_midi_t midi;   /* the MIDI options (lsdj_midi.h): save-store record 16 */
 #define MIDI_REC 16u
+static lsdj_feat_t feat;   /* the feature switches, SETTINGS / FX+LIGHTS (lsdj_feat.h): record 23 */
+#define FEAT_REC 23u
 static lsdj_menu_t menu;
-/* The settings (record 0) and the MIDI options (record 16), only what changed. The
-   flash must be safe (emulator parked). 0 = ok. */
+/* A save-store record, if it changed. 0 = ok. */
+static int rec_put(unsigned r,uint32_t w){return ((ftl.rec_has>>r)&1u)&&ftl.rec[r]==w?0:ftl_put_record(&ftl,r,w);}
+/* The settings (record 0), the MIDI options (record 16) and the feature switches
+   (record 23), only what changed. The flash must be safe (emulator parked). 0 = ok. */
 static int settings_store(void){
     int rc=ftl_put_settings(&ftl,lsdj_set_pack(&settings));
-    uint32_t w=lsdj_midi_pack(&midi);
-    if(!rc&&!(((ftl.rec_has>>MIDI_REC)&1u)&&ftl.rec[MIDI_REC]==w))rc=ftl_put_record(&ftl,MIDI_REC,w);
+    if(!rc)rc=rec_put(MIDI_REC,lsdj_midi_pack(&midi));
+    if(!rc)rc=rec_put(FEAT_REC,lsdj_feat_pack(&feat));
     return rc;
 }
 static char menu_hint[20];
@@ -392,6 +403,24 @@ static uint32_t sound_clock(void){
 static uint32_t tick_target;
 static void sync_link_send(uint8_t b){(void)b;gp_link_tick_at(tick_target);}
 static int16_t midi_pc_row=-1;   /* a program change to cue (cue_frame takes it) */
+/* Who muted each channel (for the MUTE POPUP): 1 the C4-F4 keys, 2 the web page, 3 MIDI CC 81. */
+static uint8_t mute_by[4];
+static void mute_mark(uint8_t before,uint8_t by){
+    for(unsigned c=0;c<4u;c++)if((fx.mute&~before)>>c&1u)mute_by[c]=by;
+}
+/* SHOW CC: an effect moved by MIDI CC, as a message: "PU2 CUTOFF" / "MIDI CC 74: 5A". */
+static void cc_show(unsigned c,unsigned cc){
+    unsigned i=0;
+    while(i<LSDJ_MIDI_CCS&&lsdj_midi_cc_num[i]!=cc)i++;
+    if(i>=LSDJ_MIDI_CCS)return;
+    char l1[20],l2[20],v[6];unsigned e=lsdj_midi_cc_fxk[i],n=0;
+    if(lsdj_fxk_on_channel(e)||cc==81u)n=lsdj_fx_put(l1,lsdj_fx_put(l1,0,lsdj_fx_target_name[c&3u])," ");
+    lsdj_fx_put(l1,n,e==FXK_NONE?"MUTE":lsdj_fxk_name[e]);   /* (the knobs' names: no second table) */
+    n=lsdj_fx_put(l2,lsdj_fx_num(l2,lsdj_fx_put(l2,0,"MIDI CC "),cc),": ");
+    if(e==FXK_NONE)lsdj_fx_put(l2,n,(fx.mute>>c)&1u?"MUTED":"PLAYING");
+    else{lsdj_fx_ui_t t=fxu;t.target=(uint8_t)(c&3u);lsdj_fxk_value(&fx,&t,e,v);lsdj_fx_put(l2,n,v);}
+    lsdj_ov_show(&ov,l1,l2,fm1_ms);
+}
 static uint8_t midi_note_told;
 static void midi_in(uint32_t pkt,uint32_t at_ms,uint32_t src){
     uint8_t st=(uint8_t)(pkt>>8),d1=(uint8_t)(pkt>>16);
@@ -402,7 +431,11 @@ static void midi_in(uint32_t pkt,uint32_t at_ms,uint32_t src){
             midi_note_told=1;lsdj_ov_show(&ov,"MIDI NOTES: SET","LSDJ SYNC TO KEYBD",fm1_ms);
         }
         lsdj_keybd_note(d1,1);return;
-    case LSDJ_MIDI_CC:(void)lsdj_midi_cc(&midi,&fx,pkt);return;
+    case LSDJ_MIDI_CC:{
+        uint8_t before=fx.mute;int c=lsdj_midi_cc(&midi,&fx,pkt);
+        if(c){mute_mark(before,3);if(feat.v[LSDJ_FEAT_CCSHOW])cc_show((unsigned)c-1u,d1);}
+        return;
+    }
     case LSDJ_MIDI_PC:midi_pc_row=d1;return;
     default:return;
     }
@@ -418,11 +451,30 @@ static void midi_in(uint32_t pkt,uint32_t at_ms,uint32_t src){
    columns (lsdj_overlay.h). hot = the knob just turned (amber), -1 none. While
    it shows, it is refilled every frame (cursor moves, synced times...). */
 static lsdj_ov_bars_t bars;
+static uint32_t mute_pop_until;   /* MUTE POPUP: the title says why mute_pop_ch is silent, until then */
+static uint8_t mute_pop_ch;
+/* The channels knob k's effect acts on (bit per channel; 0: a shared effect). */
+static unsigned fx_knob_chans(unsigned k){
+    if(!lsdj_fxk_on_channel(lsdj_fx_knob(&fxu,k)))return 0;
+    if(lsdj_fx_chmode(&fxu))return 1u<<k;
+    unsigned t=lsdj_fx_eff(&fxu);return t<4u?1u<<t:15u;
+}
 static void fx_bars_fill(void){
     lsdj_fx_bars(&fx,&fxu,bars.hot,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
     lsdj_fx_bar_choices(&fx,&fxu,bars.nchoice,bars.pick,bars.choice);
     bars.amount_scale=1;
     bars.strip=fxu.held?(uint8_t)(0x80u|fx.mute):0u;
+    bars.grey=0;   /* GREY MUTED: a muted channel's controls (KNOBS = CHANNELS: its column) */
+    if(feat.v[LSDJ_FEAT_GREY]&&!fxu.held)
+        for(unsigned k=0;k<4u;k++){
+            unsigned ch=fx_knob_chans(k);
+            if(ch&&(ch&fx.mute)==ch)bars.grey|=(uint8_t)(lsdj_fx_chmode(&fxu)?1u<<k:0x80u);
+        }
+    if(mute_pop_until&&(int32_t)(mute_pop_until-fm1_ms)>0){   /* "PU1 MUTED: KEYS" (15: the panel's width) */
+        static const char *const by[4]={"",": KEYS",": WEB",": CC81"};
+        lsdj_fx_put(bars.title,lsdj_fx_put(bars.title,lsdj_fx_put(bars.title,0,lsdj_fx_target_name[mute_pop_ch&3u])," MUTED"),
+                    by[mute_by[mute_pop_ch&3u]&3u]);
+    }else mute_pop_until=0;
     { unsigned t=lsdj_fx_eff(&fxu);bars.chan=(int8_t)(t<4u?(int)t:-1); }   /* frame the channel the effects act on */
 }
 static void fx_bars_show(int hot){
@@ -453,6 +505,10 @@ static void fx_load(void){
     }
     (void)lsdj_fx_unpack_n(&fx,&fxu,w,n);
 }
+/* The feature switches the effects controls use (KNOBS = CHANNELS starts on its first effect). */
+static void feat_apply(void){
+    if(fxu.channels!=feat.v[LSDJ_FEAT_CHANNELS]){fxu.channels=feat.v[LSDJ_FEAT_CHANNELS];fxu.param=0;fxu.page=FX_PAGE_FILTER;}
+}
 /* Themes (firmware/lsdj_theme.h): the screen's four colours and the overlay's. */
 #include "lsdj_theme.h"
 typedef char lsdj_theme_count_ok[LSDJ_THEMES==LSDJ_SET_THEMES?1:-1];
@@ -477,7 +533,7 @@ static void menu_input(void){
     int32_t enc[FM1_NENC];
     for(unsigned e=0;e<FM1_NENC;e++)enc[e]=fm1_enc_take(e);
     int32_t st[4]={enc[2],enc[3],enc[4],enc[5]};
-    if(lsdj_menu_knobs(&menu,&settings,&midi,st,enc[0])==1)settings_apply();
+    switch(lsdj_menu_knobs(&menu,&settings,&midi,&feat,st,enc[0])){case 1:settings_apply();break;case 3:feat_apply();break;}
     if(enc[0]||st[0]||st[1]||st[2]||st[3])menu_hint_until=0;
     static const char *const knob_name[2]={"PRESETS: ","ALGO: "};
     static const int enc_of[2]={LSDJ_ENC_PRESETS,LSDJ_ENC_ALGORITHM};
@@ -686,7 +742,9 @@ static void seq_button(void){
    taken (or the emulator on CPU0 is between frames, or stopped). */
 static void native_draw(void){
     lsdj_nat_t n={gp_pixels(),gp_vram(),gp_lcdc(),gp_bgp(),gp_shades()};
-    lsdj_nat_mode(&n,seq_cover,seq_screen==4u);
+    lsdj_nat_mode(&n,seq_cover,seq_screen==4u);   /* (part of LSDj's screen: LSDj's colours) */
+    const lsdj_theme_t *ft=lsdj_theme_of(lsdj_feat_theme(&feat,settings.theme));   /* FX THEME (MATCH: LSDj's) */
+    n.shade=ft->gb;
     /* the panel, with the knobs' names on LSDj's bottom two rows: the effects
        page's, or the cue / tempo panel's own while ARP / EDIT is held. Only
        while the panel shows: otherwise LSDj's screen is left whole. */
@@ -695,15 +753,19 @@ static void native_draw(void){
         char names[4][7];
         if(own)for(unsigned k=0;k<4u;k++){unsigned j=0;for(;j<6u&&bars.label[k][j];j++)names[k][j]=bars.label[k][j];names[k][j]=0;}
         else lsdj_fx_names(&fxu,names);
-        lsdj_nat_bars(&n,&bars,lsdj_theme_of(settings.theme)->accent);
-        if(!own)lsdj_nat_pagemap(&n,lsdj_fx_group_letters[fxu.held?1:0],lsdj_fx_pos(&fxu));   /* the pages of the group, in the screen map */
+        lsdj_nat_bars(&n,&bars,ft->accent);
+        if(!own){
+            lsdj_nat_pagemap(&n,lsdj_fx_group_letters[fxu.held?1:0],fxu.channels&&!fxu.held?lsdj_fx_cur(&fxu)-FX_PAGE_FILTER:lsdj_fx_pos(&fxu));   /* the pages of the group, in the screen map */
+            if(feat.v[LSDJ_FEAT_BATTERY])lsdj_nat_battery(&n,17,15,battery_level());   /* BATTERY: after "FX" */
+        }
         lsdj_nat_names(&n,(const char(*)[7])names,bars.hot);
     }else bars.until_ms=0;
     if(menu.open){
         int hint=menu_hint_until&&(int32_t)(menu_hint_until-fm1_ms)>0;
         char lines[LSDJ_MENU_LINES][20];
-        unsigned cnt=lsdj_menu_lines(&menu,&settings,&midi,hint?menu_hint:0,lines);   /* the open page */
+        unsigned cnt=lsdj_menu_lines(&menu,&settings,&midi,&feat,hint?menu_hint:0,lines);   /* the open page */
         lsdj_nat_list(&n,(const char(*)[20])lines,cnt,(int)menu.cursor);
+        if(feat.v[LSDJ_FEAT_BATTERY])lsdj_nat_battery(&n,17,1,battery_level());   /* BATTERY: the blank row under the title */
     }
     if(lsdj_ov_active(&ov,fm1_ms))lsdj_nat_message(&n,ov.line[0],ov.line[1]);
     else ov.until_ms=0;
@@ -737,6 +799,13 @@ static void lk_reset(void){gp_reset();}
 static const char *lk_firmware(void){return FELUCCA_ID;}
 static const char *lk_title(void){return gp_title();}
 static int lk_live_known(void){return cursor_addr!=0;}
+/* The battery as bars of 3 (Felucca's thresholds 531 / 561 / 591), +0x80 on USB power (a host
+   that configured us and is awake: the FM-1 has no charge line); 0xFF before a reading. */
+static unsigned battery_level(void){
+    if(!batt_raw)return 0xFFu;
+    unsigned bars=batt_raw>=591?3u:batt_raw>=561?2u:batt_raw>=531?1u:0u;
+    return usb.config&&!usb.suspended?0x80u|bars:bars;
+}
 static uint32_t lk_settings_get(void){return lsdj_set_pack(&settings);}
 static int lk_settings_set(uint32_t v){
     lsdj_settings_t t;if(!lsdj_set_unpack(v,&t))return 0;
@@ -753,9 +822,7 @@ static void lk_theme_set(const uint16_t c[8]){lsdj_theme_from8(&lsdj_theme_custo
 static int theme_store(void){   /* the custom theme: records 12..15, only what changed */
     uint16_t c[8];lsdj_theme_to8(&lsdj_theme_custom,c);
     for(unsigned i=0;i<4u;i++){
-        uint32_t w=(uint32_t)c[2*i]|(uint32_t)c[2*i+1]<<16;unsigned r=12u+i;
-        if(((ftl.rec_has>>r)&1u)&&ftl.rec[r]==w)continue;
-        if(ftl_put_record(&ftl,r,w))return -1;
+        if(rec_put(12u+i,(uint32_t)c[2*i]|(uint32_t)c[2*i+1]<<16))return -1;
     }
     return 0;
 }
@@ -775,6 +842,7 @@ static int lk_store_config(void){
 }
 static void lk_live(lsdj_link_live_t *l){
     l->page=(uint8_t)lsdj_fx_cur(&fxu);l->cursor_ch=fxu.cursor_ch;l->bpm=fx.bpm;l->mute=fx.mute;l->freeze=fx.freeze;l->playing=0;
+    l->battery=(uint8_t)battery_level();
     if(armed_addr)for(unsigned c=0;c<4;c++)if(gp_wram_peek((uint16_t)(armed_addr+c)))l->playing|=(uint8_t)(1u<<c);
 }
 #if LSDJ_BLE
@@ -796,11 +864,13 @@ static const volatile uint8_t *lk_cartridge(uint32_t *len){
 }
 static int lk_mute_set(uint8_t m,uint8_t f){   /* the web page's channel buttons and freeze */
     if(m>15u||f>1u)return 0;
-    fx.mute=m;fx.freeze=f;lsdj_fx_update(&fx);return 1;
+    uint8_t before=fx.mute;fx.mute=m;fx.freeze=f;mute_mark(before,2);lsdj_fx_update(&fx);return 1;
 }
+static uint32_t lk_feat_get(void){return lsdj_feat_pack(&feat);}
+static int lk_feat_set(uint32_t v){lsdj_feat_t t;if(!lsdj_feat_unpack(v,&t))return 0;feat=t;feat_apply();return 1;}
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,
-    lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set};
+    lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set,lk_feat_get,lk_feat_set};
 static int app_sysex_frame(const uint8_t *frame,uint32_t size){
     if(!lsdj_link_match(frame,size))return 0;
     static uint8_t reply[LSDJ_LINK_REPLY_MAX];
@@ -881,7 +951,43 @@ static void ble_frame(void){
     if(s!=LSDJ_BLE_READY)ble_shown=s;   /* (READY: on the way to advertising) */
 }
 #endif
+/* After KNOB 1-4 turned (steps = clicks per knob): MUTE POPUP when a turned effect plays
+   on muted channels only; CC OUT sends each turned effect's CC (lsdj_midi.h numbers), per
+   channel on the CC FX channels (PU1's: CC FX, or 1 when it is off). */
+static void fx_knobs_after(const int32_t st[4]){
+    for(unsigned k=0;k<4u;k++){
+        unsigned ch=fx_knob_chans(k),e=lsdj_fx_knob(&fxu,k),cc=lsdj_midi_cc_of_fxk(e),base=midi.cc?midi.cc-1u:0u;
+        if(!st[k])continue;
+        if(feat.v[LSDJ_FEAT_MUTEPOP]&&ch&&(ch&fx.mute)==ch){
+            mute_pop_ch=0;while(!((ch>>mute_pop_ch)&1u))mute_pop_ch++;
+            mute_pop_until=(fm1_ms+lsdj_ov_ms)|1u;
+        }
+        if(!feat.v[LSDJ_FEAT_CCOUT]||!cc)continue;
+        for(unsigned c=0;c<4u;c++){
+            if(ch?!((ch>>c)&1u):c)continue;   /* a shared effect: once, on PU1's channel */
+            lsdj_fx_ui_t t=fxu;t.target=(uint8_t)c;
+            uint32_t v=lsdj_midi_cc_value(&fx,e,lsdj_fxk_get(&fx,&t,e)),f=irq_save();
+            midi_out_event(0x0Bu|(0xB0u|(base+c))<<8|cc<<16|v<<24);irq_restore(f);
+        }
+    }
+}
+/* PAGE LIGHTS: one black key, at the soft level, shows the page: C#4 D#4 F#4 G#4 A#4 C#5 (black keys
+   no Game Boy button uses) = the FX page 1..6 while the effects panel shows, else LSDj's screen
+   SONG CHAIN PHRASE INSTR TABLE GROOVE (LSDj 9.3.9's screen byte, harness/screen_map.sh; other
+   screens and unknown LSDj versions: none). */
+static uint32_t page_light(void){
+    static const uint8_t key[6]={8,10,13,15,17,20},scr[6]={4,3,1,6,5,2};
+    unsigned i=6;
+    if(!feat.v[LSDJ_FEAT_KEYLIGHTS]||fxu.held)return 0;
+    if(lsdj_ov_bars_active(&bars,fm1_ms)&&!cue.held&&!tempo.held)i=lsdj_fx_cur(&fxu)-FX_PAGE_FILTER;
+    else if(screen_addr){uint8_t s=gp_wram_peek(screen_addr);for(i=0;i<6u&&scr[i]!=s;i++);}
+    return i<6u?1u<<key[i]:0u;
+}
+/* MODE LIGHTS: the power-on sweep again when HOME changes note / button mode, once every key and
+   button is let go (a key or button down ends the sweep at once). */
+static uint8_t mode_sweep;
 static void fm1_input_frame(void){
+    if(mode_sweep&&!fm1_in.buttons&&!fm1_in.notes){mode_sweep=0;fm1_led_anim_start(0);}
     led_anim=(uint8_t)leds_busy();
     play_light();cue_frame();seq_frame();
     /* MIDI sync: START presses for the transport (lsdj_midisync.h), whatever is open */
@@ -900,30 +1006,31 @@ static void fm1_input_frame(void){
         lsdj_tempo_bars(&tempo,sync_midi,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
         for(unsigned k=0;k<4u;k++)bars.nchoice[k]=0;
         bars.amount_scale=0;
-        bars.hot=-1;bars.chan=-1;lsdj_ov_bars_keep(&bars,fm1_ms);
+        bars.hot=-1;bars.chan=-1;bars.grey=0;lsdj_ov_bars_keep(&bars,fm1_ms);
     }
     if(cue.held){   /* ARP held: K1 / K2 choose the song row to cue, not effects */
         lsdj_cue_turn(&cue,(int)enc[2],(int)enc[3]);enc[2]=enc[3]=enc[4]=enc[5]=0;
         lsdj_cue_bars(&cue,gp_save_data()+songtab_off,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
         for(unsigned k=0;k<4u;k++)bars.nchoice[k]=0;
         bars.amount_scale=0;
-        bars.hot=-1;bars.chan=-1;lsdj_ov_bars_keep(&bars,fm1_ms);
+        bars.hot=-1;bars.chan=-1;bars.grey=0;lsdj_ov_bars_keep(&bars,fm1_ms);
     }
     if(fx_held&&!fxu.held&&(fm1_ms-fx_held_since>=FX_HOLD_MS||enc[0]||enc[2]||enc[3]||enc[4]||enc[5]||(key_lo&~fx_hold_keys_prev)))
         {fxu.held=1;bars.hot=-1;}   /* held (or used): the master pages, the hint until a knob turns */
     {   /* KNOB 1-4 (encoders 2-5): the page's four effects */
         int32_t st[4]={enc[2],enc[3],enc[4],enc[5]};
         int k=lsdj_fx_knobs(&fx,&fxu,st);
-        if(k>=0){fx_bars_show(k);if(fx_held)fx_used=1;}   /* FX + knob is not a tap */
+        if(k>=0){fx_knobs_after(st);fx_bars_show(k);if(fx_held)fx_used=1;}   /* FX + knob is not a tap */
     }
-    if(enc[0]){   /* SELECT knob (encoder 0): effects pages */
-        lsdj_fx_page_turn(&fxu,(int)enc[0]);fx_bars_show(-1);
+    if(enc[0]){   /* SELECT knob (encoder 0): effects pages, stopping at the ends (PAGE WRAP: round) */
+        lsdj_fx_page_turn(&fxu,(int)enc[0],feat.v[LSDJ_FEAT_WRAP]);fx_bars_show(-1);
         if(fx_held)fx_used=1;
     }
     if(!cue.held&&!tempo.held&&lsdj_ov_bars_active(&bars,fm1_ms))fx_bars_fill();
     if(fx_held){   /* FX held: the master pages and the channel strip; LSDj gets no input meanwhile */
         uint32_t down=key_lo&~fx_hold_keys_prev;fx_hold_keys_prev=key_lo;
-        if(down&&lsdj_fx_hold_keys(&fx,down))fx_used=1;
+        uint8_t before=fx.mute;
+        if(down&&lsdj_fx_hold_keys(&fx,down)){fx_used=1;mute_mark(before,1);}
         if(fxu.held){fx_bars_fill();lsdj_ov_bars_keep(&bars,fm1_ms);}
         piano_set(lsdj_fx_hold_lights(&fx));
         gp_buttons(sync_btn);return;
@@ -932,8 +1039,10 @@ static void fm1_input_frame(void){
     uint8_t mode_was=lsdj_in.mode;int8_t oct_was=lsdj_in.octave;
     input_buttons=lsdj_input_frame(&lsdj_in,key_lo,panel_now,enc);
     /* On-screen messages for what the FM-1's own buttons just did. */
-    if(lsdj_in.mode!=mode_was)
+    if(lsdj_in.mode!=mode_was){
         lsdj_ov_say(&ov,lsdj_in.mode==LSDJ_KEYS_NOTES?LSDJ_MSG_NOTE_MODE:LSDJ_MSG_BUTTON_MODE,fm1_ms);
+        mode_sweep=feat.v[LSDJ_FEAT_ANIM];
+    }
     else if(lsdj_in.octave!=oct_was)
         lsdj_ov_octave(&ov,lsdj_in.octave<oct_was,lsdj_in.octave,fm1_ms);
     else if(lsdj_in.mode==LSDJ_KEYS_BUTTONS&&(panel_now&~panel_was&3u))
@@ -1060,10 +1169,11 @@ void gb_cstart(const uint32_t *parameters){
     theme_load();   /* the custom theme, before the settings choose a theme */
     lsdj_set_unpack(ftl.has_settings?ftl.settings:0u,&settings);settings_apply();
     lsdj_midi_unpack(((ftl.rec_has>>MIDI_REC)&1u)?ftl.rec[MIDI_REC]:0u,&midi);   /* (defaults if none) */
+    lsdj_feat_unpack(((ftl.rec_has>>FEAT_REC)&1u)?ftl.rec[FEAT_REC]:0u,&feat);
 #if LSDJ_BLE
     ble_rf_boot();   /* this unit's radio calibration, while nothing else reads flash */
 #endif
-    lsdj_fx_init(&fx,fx_echo);lsdj_fx_ui_init(&fxu);fx_load();gp_set_fx(fx_hook);cursor_detect();
+    lsdj_fx_init(&fx,fx_echo);lsdj_fx_ui_init(&fxu);fx_load();feat_apply();gp_set_fx(fx_hook);cursor_detect();
     fm1_led_key(SAVE_BUTTON,1);
 #endif
     boot_splash(display_ok);
@@ -1143,6 +1253,11 @@ void gb_cstart(const uint32_t *parameters){
                 if(!(core1_emu&&video_online)&&video_fallbacks!=told&&fm1_ms>6000u){
                     told=video_fallbacks;lsdj_ov_show(&ov,"CPU1 STOPPED: SOUND","MAY CRACKLE. OFF+ON",fm1_ms);
                 }
+            }
+            {   /* BATTERY: low (no bars, not on USB): say so once */
+                static uint8_t low_told;unsigned b=battery_level();
+                if(b==0u&&!low_told&&feat.v[LSDJ_FEAT_BATTERY]){low_told=1;lsdj_ov_show(&ov,"BATTERY LOW","PLUG IN USB SOON",fm1_ms);}
+                else if(b!=0u&&b!=0xFFu&&(b&0x80u||b>=2u))low_told=0;
             }
             if(lsdj_cpu_poll(&cpu,fm1_ticks())&&settings.meter&&!menu.open){
                 static char l1[20],l2[20];

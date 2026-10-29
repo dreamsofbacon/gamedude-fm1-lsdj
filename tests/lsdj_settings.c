@@ -8,6 +8,7 @@
 #include "lsdj_settings.h"
 #include "lsdj_overlay.h"
 static lsdj_midi_t mi = {LSDJ_CLK_ALL, 1, 0, 0, 0, 0, 0};
+static lsdj_feat_t fe;   /* the feature switches (FX+LIGHTS): defaults, set in main */
 
 static uint16_t scr[LSDJ_OV_W * LSDJ_OV_H];
 static void ppm(const char *dir, const char *name) {
@@ -31,7 +32,7 @@ static void check_text(const lsdj_settings_t *s) {   /* every page, every line s
         for (unsigned c = 0; c < n; c++) {
             lsdj_menu_t m; memset(&m, 0, sizeof m); m.page = (uint8_t)p; m.cursor = (uint8_t)c;
             char lines[LSDJ_MENU_LINES][20];
-            unsigned cnt = lsdj_menu_lines(&m, s, &mi, 0, lines);
+            unsigned cnt = lsdj_menu_lines(&m, s, &mi, &fe, 0, lines);
             assert(cnt == n + 2u && cnt <= LSDJ_MENU_LINES);
             for (unsigned i = 0; i < cnt; i++) { fits(lines[i], 19); assert(strlen(lines[i]) > 0); }
         }
@@ -40,6 +41,7 @@ static void check_text(const lsdj_settings_t *s) {   /* every page, every line s
 
 int main(int argc, char **argv) {
     lsdj_settings_t s, t;
+    lsdj_feat_defaults(&fe);
     /* Defaults = today's behaviour; packing round-trips every combination. */
     assert(!lsdj_set_unpack(0xFFFFFFFFu, &s) && !s.knobs_swapped && !s.presets_rev && !s.meter && !s.select_key);
     assert(!lsdj_set_unpack(0, &s));
@@ -60,52 +62,68 @@ int main(int argc, char **argv) {
     lsdj_menu_t m; memset(&m, 0, sizeof m); memset(&s, 0, sizeof s);
     const int32_t no[4] = {0, 0, 0, 0}, k1[4] = {1, 0, 0, 0};
     lsdj_menu_open(&m); assert(m.open && !m.changed && m.cursor == 0 && m.page == LSDJ_PAGE_TOP);
-    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, 0, l);
-        assert(cnt == 5 && !strcmp(l[0], "SETTINGS") && !strcmp(l[1], "CONTROLS") && !strcmp(l[2], "DISPLAY") && !strcmp(l[3], "MIDI"));
-        assert(!strcmp(l[4], "SELECT=PICK K1=OPEN")); }
-    lsdj_menu_knobs(&m, &s, &mi, no, 99); assert(m.cursor == 2);                       /* stops at MIDI */
-    assert(lsdj_menu_knobs(&m, &s, &mi, k1, 0) == 0 && m.page == LSDJ_PAGE_MIDI && m.cursor == 1 && !m.changed);
-    {   char l[LSDJ_MENU_LINES][20]; lsdj_menu_lines(&m, &s, &mi, 0, l); assert(!strcmp(l[0], "SETTINGS/MIDI") && !strcmp(l[1], "BACK")); }
-    lsdj_menu_knobs(&m, &s, &mi, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_SET_BT);   /* the last line: BLUETOOTH */
-    { int32_t s2[4] = {5, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, s2, 0) == 1 && s.bluetooth == LSDJ_SET_BT_MODES - 1u); }
+    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l);
+        assert(cnt == 6 && !strcmp(l[0], "SETTINGS") && !strcmp(l[1], "CONTROLS") && !strcmp(l[2], "DISPLAY") && !strcmp(l[3], "MIDI"));
+        assert(!strcmp(l[4], "FX+LIGHTS") && !strcmp(l[5], "SELECT=PICK K1=OPEN")); }
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(m.cursor == 3);                       /* stops at FX+LIGHTS */
+    /* FX+LIGHTS: BACK, then the feature switches in lsdj_feat.h's order; a change returns 3 */
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && m.page == LSDJ_PAGE_FEAT && m.cursor == 1);
+    assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_WRAP));
+    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l);
+        assert(cnt == LSDJ_FEAT_ITEMS + 3u && !strcmp(l[0], "SETTINGS/FX+LIGHTS") && !strcmp(l[2], "PAGE WRAP: OFF"));
+        assert(!strcmp(l[3], "GREY MUTED: ON") && !strcmp(l[7], "KNOBS: PARAMS") && !strcmp(l[11], "FX THEME: MATCH")); }
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 3 && fe.v[LSDJ_FEAT_WRAP] == 1 && m.changed);
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0);                                   /* ON: at the end */
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_THEME));
+    { int32_t s2[4] = {0, 1, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 3 && fe.v[LSDJ_FEAT_THEME] == 8); }   /* K2: 8 */
+    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "K1 NEXT  K2 JUMP 8")); }
+    { int32_t s2[4] = {-99, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); assert(fe.v[LSDJ_FEAT_THEME] == 0); }
+    lsdj_feat_defaults(&fe); m.changed = 0;
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -99); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0);  /* BACK: on FX+LIGHTS */
+    assert(m.page == LSDJ_PAGE_TOP && m.cursor == 3);
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); assert(m.cursor == 2);                       /* MIDI */
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && m.page == LSDJ_PAGE_MIDI && m.cursor == 1 && !m.changed);
+    {   char l[LSDJ_MENU_LINES][20]; lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[0], "SETTINGS/MIDI") && !strcmp(l[1], "BACK")); }
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_SET_BT);   /* the last line: BLUETOOTH */
+    { int32_t s2[4] = {5, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 1 && s.bluetooth == LSDJ_SET_BT_MODES - 1u); }
     { char l[20]; lsdj_set_line(&s, LSDJ_SET_BT, l); assert(!strcmp(l, "BLUETOOTH: DEVICE")); }
-    { int32_t s2[4] = {-5, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, s2, 0) && s.bluetooth == 0); }
-    lsdj_menu_knobs(&m, &s, &mi, no, -1); assert(lsdj_menu_entry(&m) == LSDJ_MENU_MIDI(LSDJ_MIDI_ITEMS - 1u));   /* PC CUE */
-    assert(lsdj_menu_knobs(&m, &s, &mi, k1, 0) == 2 && mi.pc_cue == 1);
-    lsdj_menu_knobs(&m, &s, &mi, no, -99); assert(m.cursor == 0 && lsdj_menu_entry(&m) == LSDJ_MENU_BACK);
-    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, 0, l); assert(!strcmp(l[cnt - 1], "K1=BACK  GLO=CLOSE")); }
-    { int32_t s2[4] = {0, 0, -1, 0}; lsdj_menu_knobs(&m, &s, &mi, s2, 0); }            /* any knob, either way */
+    { int32_t s2[4] = {-5, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.bluetooth == 0); }
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); assert(lsdj_menu_entry(&m) == LSDJ_MENU_MIDI(LSDJ_MIDI_ITEMS - 1u));   /* PC CUE */
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 2 && mi.pc_cue == 1);
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -99); assert(m.cursor == 0 && lsdj_menu_entry(&m) == LSDJ_MENU_BACK);
+    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "K1=BACK  GLO=CLOSE")); }
+    { int32_t s2[4] = {0, 0, -1, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); }            /* any knob, either way */
     assert(m.page == LSDJ_PAGE_TOP && m.cursor == 2);                                  /* back on MIDI */
     /* DISPLAY: THEME (K2 jumps 8), POPUP TIME, CPU METER */
-    lsdj_menu_knobs(&m, &s, &mi, no, -1); lsdj_menu_knobs(&m, &s, &mi, k1, 0);
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0);
     assert(m.page == LSDJ_PAGE_DISPLAY && lsdj_menu_entry(&m) == LSDJ_SET_THEME);
-    { int32_t s2[4] = {3, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, s2, 0) && s.theme == 3); }   /* THEME: one per click */
-    { int32_t s2[4] = {0, 2, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, s2, 0) && s.theme == 19); }   /* K2: 8 a click */
-    { int32_t s2[4] = {0, 99, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, s2, 0); assert(s.theme == LSDJ_SET_THEMES - 1u); }   /* stops at the end */
-    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, 0, l); assert(!strcmp(l[cnt - 1], "K1 NEXT  K2 JUMP 8")); }
-    { int32_t s2[4] = {-99, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, s2, 0); s2[0] = 3; lsdj_menu_knobs(&m, &s, &mi, s2, 0); assert(s.theme == 3); }
-    lsdj_menu_knobs(&m, &s, &mi, no, 1); assert(lsdj_menu_entry(&m) == LSDJ_SET_POPUP);   /* POPUP TIME: 1.5 3 5 10 s */
-    { int32_t s2[4] = {9, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, s2, 0) && s.popup == LSDJ_SET_POPUPS - 1u); }
+    { int32_t s2[4] = {3, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.theme == 3); }   /* THEME: one per click */
+    { int32_t s2[4] = {0, 2, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.theme == 19); }   /* K2: 8 a click */
+    { int32_t s2[4] = {0, 99, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); assert(s.theme == LSDJ_SET_THEMES - 1u); }   /* stops at the end */
+    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "K1 NEXT  K2 JUMP 8")); }
+    { int32_t s2[4] = {-99, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); s2[0] = 3; lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0); assert(s.theme == 3); }
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 1); assert(lsdj_menu_entry(&m) == LSDJ_SET_POPUP);   /* POPUP TIME: 1.5 3 5 10 s */
+    { int32_t s2[4] = {9, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.popup == LSDJ_SET_POPUPS - 1u); }
     { char l[20]; lsdj_set_line(&s, LSDJ_SET_POPUP, l); assert(!strcmp(l, "POPUP TIME: 10S")); }
     { lsdj_settings_t r; assert(lsdj_set_unpack(lsdj_set_pack(&s), &r) && r.popup == 3 && lsdj_set_popup_ms[r.popup] == 10000u); }
-    lsdj_menu_knobs(&m, &s, &mi, no, 1); assert(lsdj_menu_entry(&m) == LSDJ_SET_METER);
-    { int32_t s2[4] = {0, 1, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, s2, 0) && s.meter == 1); }
-    lsdj_menu_knobs(&m, &s, &mi, no, -9); lsdj_menu_knobs(&m, &s, &mi, k1, 0); assert(m.page == LSDJ_PAGE_TOP && m.cursor == 1);
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 1); assert(lsdj_menu_entry(&m) == LSDJ_SET_METER);
+    { int32_t s2[4] = {0, 1, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.meter == 1); }
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -9); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0); assert(m.page == LSDJ_PAGE_TOP && m.cursor == 1);
     /* CONTROLS */
-    lsdj_menu_knobs(&m, &s, &mi, no, -1); lsdj_menu_knobs(&m, &s, &mi, k1, 0);
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0);
     assert(m.page == LSDJ_PAGE_CONTROLS && lsdj_menu_entry(&m) == LSDJ_SET_KNOBS);
-    assert(lsdj_menu_knobs(&m, &s, &mi, k1, 0) && s.knobs_swapped == 1 && m.changed);
-    { int32_t st[4] = {0, 0, 3, 0}; assert(!lsdj_menu_knobs(&m, &s, &mi, st, 0) && s.knobs_swapped == 1); }   /* at the end */
-    lsdj_menu_knobs(&m, &s, &mi, no, 1);
-    { int32_t st[4] = {0, 0, 0, 1}; assert(lsdj_menu_knobs(&m, &s, &mi, st, 0) && s.presets_rev && !s.algo_rev); }   /* K4 too */
-    lsdj_menu_knobs(&m, &s, &mi, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_SET_SELKEY);
-    { int32_t st[4] = {2, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, st, 0); assert(s.select_key == 2); }
-    { int32_t st[4] = {-1, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, st, 0); assert(s.select_key == 1); }
+    assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) && s.knobs_swapped == 1 && m.changed);
+    { int32_t st[4] = {0, 0, 3, 0}; assert(!lsdj_menu_knobs(&m, &s, &mi, &fe, st, 0) && s.knobs_swapped == 1); }   /* at the end */
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 1);
+    { int32_t st[4] = {0, 0, 0, 1}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, st, 0) && s.presets_rev && !s.algo_rev); }   /* K4 too */
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_SET_SELKEY);
+    { int32_t st[4] = {2, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, st, 0); assert(s.select_key == 2); }
+    { int32_t st[4] = {-1, 0, 0, 0}; lsdj_menu_knobs(&m, &s, &mi, &fe, st, 0); assert(s.select_key == 1); }
     {   char lines[LSDJ_MENU_LINES][20];
-        unsigned cnt = lsdj_menu_lines(&m, &s, &mi, 0, lines);
+        unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, lines);
         assert(!strcmp(lines[0], "SETTINGS/CONTROLS") && !strcmp(lines[1 + 5], "SELECT KEY: F#5"));
         assert(!strcmp(lines[cnt - 1], "SELECT=PICK K1=SET"));
-        lsdj_menu_lines(&m, &s, &mi, "PRESETS: UP", lines); assert(!strcmp(lines[cnt - 1], "PRESETS: UP"));
+        lsdj_menu_lines(&m, &s, &mi, &fe, "PRESETS: UP", lines); assert(!strcmp(lines[cnt - 1], "PRESETS: UP"));
     }
     assert(m.changed);
     lsdj_menu_open(&m); assert(m.page == LSDJ_PAGE_TOP && m.cursor == 0);   /* opens on the top again */
@@ -124,7 +142,7 @@ int main(int argc, char **argv) {
             lsdj_menu_t mm; memset(&mm, 0, sizeof mm); mm.open = 1; mm.cursor = (uint8_t)(k ? 4 : 1);
             mm.page = LSDJ_PAGE_CONTROLS;
             char lines[LSDJ_MENU_LINES][20];
-            unsigned cnt = lsdj_menu_lines(&mm, &shown[k], &mi, 0, lines);
+            unsigned cnt = lsdj_menu_lines(&mm, &shown[k], &mi, &fe, 0, lines);
             lsdj_ov_list(scr, (const char (*)[20])lines, cnt, mm.cursor);
             ppm(argv[1], k ? "menu_b" : "menu_a");
         }

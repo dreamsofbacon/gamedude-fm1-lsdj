@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include "lsdj_midi.h"   /* the MIDI lines follow the settings in the list */
 #include "lsdj_theme.h"  /* the theme names (tools/themes.py) */
+#include "lsdj_feat.h"   /* the FX+LIGHTS page: feature switches */
 
 typedef struct {
     uint8_t knobs_swapped;   /* 0: PRESETS = up/down, ALGORITHM = left/right; 1: the other way */
@@ -115,20 +116,24 @@ static void lsdj_set_line(const lsdj_settings_t *s, unsigned item, char line[20]
     default: n = lsdj_set_put(line, 0, "CPU METER: "); lsdj_set_put(line, n, s->meter ? "ON" : "OFF"); break;
     }
 }
-/* The menu in categories: the top page lists them (CONTROLS, DISPLAY, MIDI);
+/* The menu in categories: the top page lists them (CONTROLS, DISPLAY, MIDI, FX+LIGHTS);
    each opens its own page, which starts with a BACK line. Knobs only: the
    SELECT knob moves between the lines, KNOB 1-4 change the selected setting,
    open the selected category or, on BACK, go back. GLO closes (and keeps the
    changes). A page entry: a setting (< 0x40), a MIDI option (0x40 + item,
-   lsdj_midi.h), a category (0x80 + page), BACK (0xFF). */
-enum { LSDJ_PAGE_TOP, LSDJ_PAGE_CONTROLS, LSDJ_PAGE_DISPLAY, LSDJ_PAGE_MIDI, LSDJ_PAGES };
+   lsdj_midi.h), a feature switch (0x60 + item, lsdj_feat.h), a category
+   (0x80 + page), BACK (0xFF). */
+enum { LSDJ_PAGE_TOP, LSDJ_PAGE_CONTROLS, LSDJ_PAGE_DISPLAY, LSDJ_PAGE_MIDI, LSDJ_PAGE_FEAT, LSDJ_PAGES };
 #define LSDJ_MENU_MIDI(i) (0x40u + (i))
+#define LSDJ_MENU_FEAT(i) (0x60u + (i))
 #define LSDJ_MENU_CAT(p) (0x80u + (p))
 #define LSDJ_MENU_BACK 0xFFu
-#define LSDJ_MENU_MAX (LSDJ_MIDI_ITEMS + 2u)   /* the longest page: BACK, the MIDI options, BLUETOOTH */
-static const char *const lsdj_page_name[LSDJ_PAGES] = {"SETTINGS", "CONTROLS", "DISPLAY", "MIDI"};
+#define LSDJ_MENU_MAX (LSDJ_FEAT_ITEMS + 1u)   /* the longest page: BACK and the feature switches */
+typedef char lsdj_menu_max_ok[LSDJ_MENU_MAX >= LSDJ_MIDI_ITEMS + 2u ? 1 : -1];   /* ... MIDI: BACK, options, BLUETOOTH */
+static const char *const lsdj_page_name[LSDJ_PAGES] = {"SETTINGS", "CONTROLS", "DISPLAY", "MIDI", "FX+LIGHTS"};
 static unsigned lsdj_menu_entries(unsigned page, uint8_t e[LSDJ_MENU_MAX]) {
-    static const uint8_t top[] = {LSDJ_MENU_CAT(LSDJ_PAGE_CONTROLS), LSDJ_MENU_CAT(LSDJ_PAGE_DISPLAY), LSDJ_MENU_CAT(LSDJ_PAGE_MIDI)};
+    static const uint8_t top[] = {LSDJ_MENU_CAT(LSDJ_PAGE_CONTROLS), LSDJ_MENU_CAT(LSDJ_PAGE_DISPLAY), LSDJ_MENU_CAT(LSDJ_PAGE_MIDI),
+                                  LSDJ_MENU_CAT(LSDJ_PAGE_FEAT)};
     static const uint8_t controls[] = {LSDJ_MENU_BACK, LSDJ_SET_KNOBS, LSDJ_SET_PRESETS_DIR, LSDJ_SET_ALGO_DIR, LSDJ_SET_PLAYREC, LSDJ_SET_SELKEY};
     static const uint8_t display[] = {LSDJ_MENU_BACK, LSDJ_SET_THEME, LSDJ_SET_POPUP, LSDJ_SET_METER};
     unsigned n = 0;
@@ -140,6 +145,10 @@ static unsigned lsdj_menu_entries(unsigned page, uint8_t e[LSDJ_MENU_MAX]) {
         for (unsigned i = 0; i < LSDJ_MIDI_ITEMS; i++) e[n++] = (uint8_t)LSDJ_MENU_MIDI(i);
         e[n++] = LSDJ_SET_BT;
         break;
+    case LSDJ_PAGE_FEAT:
+        e[n++] = LSDJ_MENU_BACK;
+        for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++) e[n++] = (uint8_t)LSDJ_MENU_FEAT(i);
+        break;
     default: for (unsigned i = 0; i < sizeof top; i++) e[n++] = top[i]; break;
     }
     return n;
@@ -150,8 +159,8 @@ static uint8_t lsdj_menu_entry(const lsdj_menu_t *m) {
 }
 /* SELECT knob clicks move the selection (stopping at the ends); KNOB 1-4 clicks
    change the selected setting, open a category, or go BACK. Returns 1 if a
-   setting changed, 2 if a MIDI option did, 0 otherwise. */
-static int lsdj_menu_knobs(lsdj_menu_t *m, lsdj_settings_t *s, lsdj_midi_t *mi, const int32_t steps[4], int32_t select) {
+   setting changed, 2 if a MIDI option did, 3 if a feature switch did, 0 otherwise. */
+static int lsdj_menu_knobs(lsdj_menu_t *m, lsdj_settings_t *s, lsdj_midi_t *mi, lsdj_feat_t *f, const int32_t steps[4], int32_t select) {
     uint8_t e[LSDJ_MENU_MAX]; unsigned n = lsdj_menu_entries(m->page, e);
     if (select) {
         int c = (int)m->cursor + (int)select;
@@ -159,13 +168,14 @@ static int lsdj_menu_knobs(lsdj_menu_t *m, lsdj_settings_t *s, lsdj_midi_t *mi, 
     }
     if (m->cursor >= n) m->cursor = (uint8_t)(n - 1u);
     uint8_t it = e[m->cursor];
-    /* on THEME, K2 jumps 8 themes a click (there are many) */
-    int st = (int)steps[0] + (int)steps[1] * (it == LSDJ_SET_THEME ? 8 : 1) + (int)steps[2] + (int)steps[3];
+    /* on THEME and FX THEME, K2 jumps 8 themes a click (there are many) */
+    int st = (int)steps[0] + (int)steps[1] * (it == LSDJ_SET_THEME || it == LSDJ_MENU_FEAT(LSDJ_FEAT_THEME) ? 8 : 1) + (int)steps[2] + (int)steps[3];
     if (!st) return 0;
     if (it == LSDJ_MENU_BACK) {   /* back to the top, on the category we came from */
         m->cursor = (uint8_t)(m->page - 1u); m->page = LSDJ_PAGE_TOP; return 0;
     }
     if (it >= LSDJ_MENU_CAT(0)) { m->page = (uint8_t)(it - LSDJ_MENU_CAT(0)); m->cursor = 1; return 0; }   /* open: on its first setting */
+    if (it >= LSDJ_MENU_FEAT(0)) { if (lsdj_feat_turn(f, it - LSDJ_MENU_FEAT(0), st)) { m->changed = 1; return 3; } return 0; }
     if (it >= LSDJ_MENU_MIDI(0)) { if (lsdj_midi_turn(mi, it - LSDJ_MENU_MIDI(0), st)) { m->changed = 1; return 2; } return 0; }
     if (lsdj_set_turn(s, it, st)) { m->changed = 1; return 1; }
     return 0;
@@ -174,7 +184,7 @@ static int lsdj_menu_knobs(lsdj_menu_t *m, lsdj_settings_t *s, lsdj_midi_t *mi, 
    the bottom line (hint, or how to use the selected line). Up to 19 characters
    each. Returns the number of lines. */
 #define LSDJ_MENU_LINES (LSDJ_MENU_MAX + 2u)
-static unsigned lsdj_menu_lines(const lsdj_menu_t *m, const lsdj_settings_t *s, const lsdj_midi_t *mi, const char *hint,
+static unsigned lsdj_menu_lines(const lsdj_menu_t *m, const lsdj_settings_t *s, const lsdj_midi_t *mi, const lsdj_feat_t *f, const char *hint,
                                 char lines[LSDJ_MENU_LINES][20]) {
     uint8_t e[LSDJ_MENU_MAX]; unsigned n = lsdj_menu_entries(m->page, e);
     uint32_t k = lsdj_set_put(lines[0], 0, "SETTINGS");
@@ -183,11 +193,12 @@ static unsigned lsdj_menu_lines(const lsdj_menu_t *m, const lsdj_settings_t *s, 
         uint8_t it = e[i];
         if (it == LSDJ_MENU_BACK) lsdj_set_put(lines[1 + i], 0, "BACK");
         else if (it >= LSDJ_MENU_CAT(0)) lsdj_set_put(lines[1 + i], 0, lsdj_page_name[(it - LSDJ_MENU_CAT(0)) % LSDJ_PAGES]);
+        else if (it >= LSDJ_MENU_FEAT(0)) lsdj_feat_line(f, it - LSDJ_MENU_FEAT(0), lines[1 + i]);
         else if (it >= LSDJ_MENU_MIDI(0)) lsdj_midi_line(mi, it - LSDJ_MENU_MIDI(0), lines[1 + i]);
         else lsdj_set_line(s, it, lines[1 + i]);
     }
     uint8_t sel = e[m->cursor < n ? m->cursor : n - 1u];
-    lsdj_set_put(lines[n + 1u], 0, hint ? hint : sel == LSDJ_SET_THEME ? "K1 NEXT  K2 JUMP 8" : sel == LSDJ_MENU_BACK ? "K1=BACK  GLO=CLOSE" :
+    lsdj_set_put(lines[n + 1u], 0, hint ? hint : sel == LSDJ_SET_THEME || sel == LSDJ_MENU_FEAT(LSDJ_FEAT_THEME) ? "K1 NEXT  K2 JUMP 8" : sel == LSDJ_MENU_BACK ? "K1=BACK  GLO=CLOSE" :
                  sel >= LSDJ_MENU_CAT(0) && sel != LSDJ_MENU_BACK ? "SELECT=PICK K1=OPEN" : "SELECT=PICK K1=SET");
     return n + 2u;
 }

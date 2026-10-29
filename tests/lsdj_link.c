@@ -32,7 +32,7 @@ static int io_fset(const uint32_t *w, unsigned n) {
 static void io_tget(uint16_t c[8]) { memcpy(c, theme, sizeof theme); }
 static void io_tset(const uint16_t c[8]) { memcpy(theme, c, sizeof theme); }
 static int io_cstore(void) { config_stores++; return 0; }
-static void io_live(lsdj_link_live_t *l) { l->page = 2; l->cursor_ch = 3; l->bpm = 170; l->mute = 5; l->freeze = 1; l->playing = 0xF; }
+static void io_live(lsdj_link_live_t *l) { l->page = 2; l->cursor_ch = 3; l->bpm = 170; l->mute = 5; l->freeze = 1; l->playing = 0xF; l->battery = 0x82; }
 static uint32_t midi_word = 0x4D000009u;
 static uint32_t io_mget(void) { return midi_word; }
 static int io_mset(uint32_t v) { if (v >> 24 != 0x4D) return 0; midi_word = v; return 1; }
@@ -41,8 +41,15 @@ static int cart_available = 1;
 static const volatile uint8_t *io_cart(uint32_t *len) { *len = sizeof cartridge; return cart_available ? cartridge : 0; }
 static uint8_t mute_now, freeze_now;
 static int io_mute(uint8_t m, uint8_t f) { if (m > 15 || f > 1) return 0; mute_now = m; freeze_now = f; return 1; }
+static uint32_t feat_word = 0x460001C6u;
+static uint32_t io_eget(void) { return feat_word; }
+static int io_eset(uint32_t v) { if (v >> 24 != 0x46) return 0; feat_word = v; return 1; }
 static const lsdj_link_io_t io = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
-                                  io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute};
+                                  io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute,
+                                  io_eget, io_eset};
+/* firmware before FM-1_979: no feature switches */
+static const lsdj_link_io_t io_old = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
+                                      io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute};
 static lsdj_link_t st;
 static uint8_t reply[LSDJ_LINK_REPLY_MAX];
 static uint32_t rn;
@@ -160,11 +167,23 @@ int main(void) {
     assert(req(LSDJ_LINK_STORE, 0, 0, 0) == LSDJ_LINK_OK && config_stores == 1);
     assert(req(LSDJ_LINK_LIVE, 0, 0, 0) == LSDJ_LINK_OK);
     assert(rd(0) == 2 && rd(1) == 3 && rd16(2) == 170 && rd(4) == 5 && rd(5) == 1 && rd(6) == 0xF && rd(7) == 0 && rd(7 + 42) == 0xF2);
+    assert(rd(7 + 4 * LSDJ_LINK_FX_WORDS) == 0x82 && rn == 6u + 2u * (8u + 4u * LSDJ_LINK_FX_WORDS) + 1u);   /* battery: 2 bars, USB */
     assert(req(LSDJ_LINK_BT, 0, 0, 0) == LSDJ_LINK_BAD);   /* no Bluetooth in this build */
     { uint8_t b[4] = {0x01, 0x80, 0x02, 0x4D};
       assert(req(LSDJ_LINK_MIDI_SET, b, 4, 0) == LSDJ_LINK_OK && midi_word == 0x4D028001u);
       assert(req(LSDJ_LINK_MIDI_GET, 0, 0, 0) == LSDJ_LINK_OK && rd(0) == 0x01 && rd(3) == 0x4D);
       uint8_t bad[4] = {0, 0, 0, 0x5A}; assert(req(LSDJ_LINK_MIDI_SET, bad, 4, 0) == LSDJ_LINK_BAD); }
+    /* FEAT_GET / FEAT_SET: the feature switches (FM-1_979); older firmware answers status 1 */
+    { uint8_t b[4] = {0x03, 0x02, 0x00, 0x46};
+      assert(req(LSDJ_LINK_FEAT_GET, 0, 0, 0) == LSDJ_LINK_OK && rd32(0) == 0x460001C6u);
+      assert(req(LSDJ_LINK_FEAT_SET, b, 4, 0) == LSDJ_LINK_OK && feat_word == 0x46000203u);
+      assert(req(LSDJ_LINK_FEAT_GET, 0, 0, 0) == LSDJ_LINK_OK && rd32(0) == 0x46000203u);
+      uint8_t bad[4] = {0, 0, 0, 0x4D}; assert(req(LSDJ_LINK_FEAT_SET, bad, 4, 0) == LSDJ_LINK_BAD && feat_word == 0x46000203u);
+      assert(req(LSDJ_LINK_FEAT_SET, b, 3, 0) == LSDJ_LINK_BAD && req(LSDJ_LINK_FEAT_GET, b, 1, 0) == LSDJ_LINK_BAD);
+      uint8_t q[4 + 8] = {0x7d, 'G', 'S', LSDJ_LINK_FEAT_GET};
+      rn = lsdj_link_handle(&st, &io_old, q, 4, 0, reply); assert(reply[5] == LSDJ_LINK_BAD);
+      q[3] = LSDJ_LINK_FEAT_SET; for (int i = 0; i < 4; i++) { q[4 + 2 * i] = b[i] & 127; q[5 + 2 * i] = b[i] >> 7; }
+      rn = lsdj_link_handle(&st, &io_old, q, 12, 0, reply); assert(reply[5] == LSDJ_LINK_BAD); }
     /* MUTE_SET: the web page's channel buttons and freeze */
     { uint8_t m[2] = {5, 1}; assert(req(LSDJ_LINK_MUTE_SET, m, 2, 0) == LSDJ_LINK_OK && mute_now == 5 && freeze_now == 1);
       uint8_t bad[2] = {16, 0}; assert(req(LSDJ_LINK_MUTE_SET, bad, 2, 0) == LSDJ_LINK_BAD && mute_now == 5);

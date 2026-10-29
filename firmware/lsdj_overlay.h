@@ -31,60 +31,61 @@ static lsdj_ov_colors_t lsdj_ov_col = {
 #define LSDJ_OV_BG     (lsdj_ov_col.bg)
 #define LSDJ_OV_EDGE   (lsdj_ov_col.accent)
 
-/* 5x7 glyphs, '#' = ink. Characters not listed draw as blank. */
+/* 5x7 glyphs: one byte per row, bit 4 = the leftmost column. Characters not
+   listed draw as blank. (Bytes, not "#...#" strings: 357 bytes instead of 3.5 KB.) */
 static const char lsdj_ov_chars[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.:-+!?/()=',#_";
-static const char *const lsdj_ov_font[][7] = {
-    {".....",".....",".....",".....",".....",".....","....."},   /* space */
-    {".###.","#...#","#...#","#####","#...#","#...#","#...#"},   /* A */
-    {"####.","#...#","#...#","####.","#...#","#...#","####."},   /* B */
-    {".###.","#...#","#....","#....","#....","#...#",".###."},   /* C */
-    {"####.","#...#","#...#","#...#","#...#","#...#","####."},   /* D */
-    {"#####","#....","#....","####.","#....","#....","#####"},   /* E */
-    {"#####","#....","#....","####.","#....","#....","#...."},   /* F */
-    {".###.","#...#","#....","#.###","#...#","#...#",".####"},   /* G */
-    {"#...#","#...#","#...#","#####","#...#","#...#","#...#"},   /* H */
-    {".###.","..#..","..#..","..#..","..#..","..#..",".###."},   /* I */
-    {"..###","...#.","...#.","...#.","...#.","#..#.",".##.."},   /* J */
-    {"#...#","#..#.","#.#..","##...","#.#..","#..#.","#...#"},   /* K */
-    {"#....","#....","#....","#....","#....","#....","#####"},   /* L */
-    {"#...#","##.##","#.#.#","#.#.#","#...#","#...#","#...#"},   /* M */
-    {"#...#","#...#","##..#","#.#.#","#..##","#...#","#...#"},   /* N */
-    {".###.","#...#","#...#","#...#","#...#","#...#",".###."},   /* O */
-    {"####.","#...#","#...#","####.","#....","#....","#...."},   /* P */
-    {".###.","#...#","#...#","#...#","#.#.#","#..#.",".##.#"},   /* Q */
-    {"####.","#...#","#...#","####.","#.#..","#..#.","#...#"},   /* R */
-    {".####","#....","#....",".###.","....#","....#","####."},   /* S */
-    {"#####","..#..","..#..","..#..","..#..","..#..","..#.."},   /* T */
-    {"#...#","#...#","#...#","#...#","#...#","#...#",".###."},   /* U */
-    {"#...#","#...#","#...#","#...#","#...#",".#.#.","..#.."},   /* V */
-    {"#...#","#...#","#...#","#.#.#","#.#.#","#.#.#",".#.#."},   /* W */
-    {"#...#","#...#",".#.#.","..#..",".#.#.","#...#","#...#"},   /* X */
-    {"#...#","#...#",".#.#.","..#..","..#..","..#..","..#.."},   /* Y */
-    {"#####","....#","...#.","..#..",".#...","#....","#####"},   /* Z */
-    {".###.","#...#","#..##","#.#.#","##..#","#...#",".###."},   /* 0 */
-    {"..#..",".##..","..#..","..#..","..#..","..#..",".###."},   /* 1 */
-    {".###.","#...#","....#","...#.","..#..",".#...","#####"},   /* 2 */
-    {"#####","...#.","..#..","...#.","....#","#...#",".###."},   /* 3 */
-    {"...#.","..##.",".#.#.","#..#.","#####","...#.","...#."},   /* 4 */
-    {"#####","#....","####.","....#","....#","#...#",".###."},   /* 5 */
-    {"..##.",".#...","#....","####.","#...#","#...#",".###."},   /* 6 */
-    {"#####","....#","...#.","..#..",".#...",".#...",".#..."},   /* 7 */
-    {".###.","#...#","#...#",".###.","#...#","#...#",".###."},   /* 8 */
-    {".###.","#...#","#...#",".####","....#","...#.",".##.."},   /* 9 */
-    {".....",".....",".....",".....",".....",".##..",".##.."},   /* . */
-    {".....",".##..",".##..",".....",".##..",".##..","....."},   /* : */
-    {".....",".....",".....","#####",".....",".....","....."},   /* - */
-    {".....","..#..","..#..","#####","..#..","..#..","....."},   /* + */
-    {"..#..","..#..","..#..","..#..","..#..",".....","..#.."},   /* ! */
-    {".###.","#...#","....#","...#.","..#..",".....","..#.."},   /* ? */
-    {".....","....#","...#.","..#..",".#...","#....","....."},   /* / */
-    {"...#.","..#..",".#...",".#...",".#...","..#..","...#."},   /* ( */
-    {".#...","..#..","...#.","...#.","...#.","..#..",".#..."},   /* ) */
-    {".....",".....","#####",".....","#####",".....","....."},   /* = */
-    {"..#..","..#..",".#...",".....",".....",".....","....."},   /* ' */
-    {".....",".....",".....",".....",".##..","..#..",".#..."},   /* , */
-    {".#.#.",".#.#.","#####",".#.#.","#####",".#.#.",".#.#."},   /* # */
-    {".....",".....",".....",".....",".....",".....","#####"},   /* _ */
+static const uint8_t lsdj_ov_font[][7] = {
+    {0x00,0x00,0x00,0x00,0x00,0x00,0x00},   /* space */
+    {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},   /* A */
+    {0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},   /* B */
+    {0x0E,0x11,0x10,0x10,0x10,0x11,0x0E},   /* C */
+    {0x1E,0x11,0x11,0x11,0x11,0x11,0x1E},   /* D */
+    {0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F},   /* E */
+    {0x1F,0x10,0x10,0x1E,0x10,0x10,0x10},   /* F */
+    {0x0E,0x11,0x10,0x17,0x11,0x11,0x0F},   /* G */
+    {0x11,0x11,0x11,0x1F,0x11,0x11,0x11},   /* H */
+    {0x0E,0x04,0x04,0x04,0x04,0x04,0x0E},   /* I */
+    {0x07,0x02,0x02,0x02,0x02,0x12,0x0C},   /* J */
+    {0x11,0x12,0x14,0x18,0x14,0x12,0x11},   /* K */
+    {0x10,0x10,0x10,0x10,0x10,0x10,0x1F},   /* L */
+    {0x11,0x1B,0x15,0x15,0x11,0x11,0x11},   /* M */
+    {0x11,0x11,0x19,0x15,0x13,0x11,0x11},   /* N */
+    {0x0E,0x11,0x11,0x11,0x11,0x11,0x0E},   /* O */
+    {0x1E,0x11,0x11,0x1E,0x10,0x10,0x10},   /* P */
+    {0x0E,0x11,0x11,0x11,0x15,0x12,0x0D},   /* Q */
+    {0x1E,0x11,0x11,0x1E,0x14,0x12,0x11},   /* R */
+    {0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E},   /* S */
+    {0x1F,0x04,0x04,0x04,0x04,0x04,0x04},   /* T */
+    {0x11,0x11,0x11,0x11,0x11,0x11,0x0E},   /* U */
+    {0x11,0x11,0x11,0x11,0x11,0x0A,0x04},   /* V */
+    {0x11,0x11,0x11,0x15,0x15,0x15,0x0A},   /* W */
+    {0x11,0x11,0x0A,0x04,0x0A,0x11,0x11},   /* X */
+    {0x11,0x11,0x0A,0x04,0x04,0x04,0x04},   /* Y */
+    {0x1F,0x01,0x02,0x04,0x08,0x10,0x1F},   /* Z */
+    {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},   /* 0 */
+    {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},   /* 1 */
+    {0x0E,0x11,0x01,0x02,0x04,0x08,0x1F},   /* 2 */
+    {0x1F,0x02,0x04,0x02,0x01,0x11,0x0E},   /* 3 */
+    {0x02,0x06,0x0A,0x12,0x1F,0x02,0x02},   /* 4 */
+    {0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},   /* 5 */
+    {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},   /* 6 */
+    {0x1F,0x01,0x02,0x04,0x08,0x08,0x08},   /* 7 */
+    {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},   /* 8 */
+    {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},   /* 9 */
+    {0x00,0x00,0x00,0x00,0x00,0x0C,0x0C},   /* . */
+    {0x00,0x0C,0x0C,0x00,0x0C,0x0C,0x00},   /* : */
+    {0x00,0x00,0x00,0x1F,0x00,0x00,0x00},   /* - */
+    {0x00,0x04,0x04,0x1F,0x04,0x04,0x00},   /* + */
+    {0x04,0x04,0x04,0x04,0x04,0x00,0x04},   /* ! */
+    {0x0E,0x11,0x01,0x02,0x04,0x00,0x04},   /* ? */
+    {0x00,0x01,0x02,0x04,0x08,0x10,0x00},   /* / */
+    {0x02,0x04,0x08,0x08,0x08,0x04,0x02},   /* ( */
+    {0x08,0x04,0x02,0x02,0x02,0x04,0x08},   /* ) */
+    {0x00,0x00,0x1F,0x00,0x1F,0x00,0x00},   /* = */
+    {0x04,0x04,0x08,0x00,0x00,0x00,0x00},   /* ' */
+    {0x00,0x00,0x00,0x00,0x0C,0x04,0x08},   /* , */
+    {0x0A,0x0A,0x1F,0x0A,0x1F,0x0A,0x0A},   /* # */
+    {0x00,0x00,0x00,0x00,0x00,0x00,0x1F},   /* _ */
 };
 
 typedef struct {
@@ -107,21 +108,6 @@ static void lsdj_ov_show(lsdj_ov_t *o, const char *l1, const char *l2, uint32_t 
 
 static int lsdj_ov_active(const lsdj_ov_t *o, uint32_t now_ms) {
     return o->until_ms && (int32_t)(o->until_ms - now_ms) > 0;
-}
-
-static void lsdj_ov_glyph(uint16_t *scr, uint32_t x0, uint32_t y0, char c) {
-    if (c >= 'a' && c <= 'z') c = (char)(c - 32);
-    uint32_t idx = 0;
-    while (lsdj_ov_chars[idx] && lsdj_ov_chars[idx] != c) idx++;
-    if (!c || !lsdj_ov_chars[idx]) return;
-    const char *const *g = lsdj_ov_font[idx];
-    for (uint32_t r = 0; r < 7; r++)
-        for (uint32_t col = 0; col < 5; col++) {
-            if (g[r][col] != '#') continue;
-            for (uint32_t dy = 0; dy < LSDJ_OV_SCALE; dy++)
-                for (uint32_t dx = 0; dx < LSDJ_OV_SCALE; dx++)
-                    scr[(y0 + r * LSDJ_OV_SCALE + dy) * LSDJ_OV_W + x0 + col * LSDJ_OV_SCALE + dx] = LSDJ_OV_FG;
-        }
 }
 
 /* See-through boxes: the picture under a box is darkened to a quarter, so LSDj
@@ -196,19 +182,6 @@ static void lsdj_ov_octave(lsdj_ov_t *o, int went_down, int octave, uint32_t now
 
 /* A full panel (the settings menu): n lines from the top, line `hi` highlighted. */
 #define LSDJ_OV_HI_BG  (lsdj_ov_col.accent)
-static void lsdj_ov_glyph_c(uint16_t *scr, uint32_t x0, uint32_t y0, char c, uint16_t fg) {
-    if (c >= 'a' && c <= 'z') c = (char)(c - 32);
-    uint32_t idx = 0;
-    while (lsdj_ov_chars[idx] && lsdj_ov_chars[idx] != c) idx++;
-    if (!c || !lsdj_ov_chars[idx]) return;
-    const char *const *g = lsdj_ov_font[idx];
-    for (uint32_t r = 0; r < 7; r++)
-        for (uint32_t col = 0; col < 5; col++)
-            if (g[r][col] == '#')
-                for (uint32_t dy = 0; dy < LSDJ_OV_SCALE; dy++)
-                    for (uint32_t dx = 0; dx < LSDJ_OV_SCALE; dx++)
-                        scr[(y0 + r * LSDJ_OV_SCALE + dy) * LSDJ_OV_W + x0 + col * LSDJ_OV_SCALE + dx] = fg;
-}
 static void lsdj_ov_panel(uint16_t *scr, const char lines[][20], uint32_t n, int hi) {
     /* Each line in its own see-through box, the highlighted one amber. */
     if (n * LSDJ_OV_LINE_H + 4u > LSDJ_OV_H) n = (LSDJ_OV_H - 4u) / LSDJ_OV_LINE_H;
@@ -220,7 +193,7 @@ static void lsdj_ov_panel(uint16_t *scr, const char lines[][20], uint32_t n, int
             uint32_t w = len * LSDJ_OV_PITCH - 2u;
             for (uint32_t yy = y - 2u; yy < y + 16u; yy++)
                 for (uint32_t x = 5u; x < 9u + w; x++) scr[yy * LSDJ_OV_W + x] = LSDJ_OV_HI_BG;
-            for (uint32_t k = 0; k < len; k++) lsdj_ov_glyph_c(scr, 7u + k * LSDJ_OV_PITCH, y, lines[i][k], LSDJ_OV_BG);
+            for (uint32_t k = 0; k < len; k++) lsdj_ov_glyph_s(scr, 7u + k * LSDJ_OV_PITCH, y, lines[i][k], LSDJ_OV_BG, LSDJ_OV_SCALE);
         } else lsdj_ov_label(scr, 7u, y, lines[i], LSDJ_OV_FG, LSDJ_OV_SCALE);
     }
 }
@@ -251,6 +224,7 @@ typedef struct {
     char choice[4][6][3];
     uint8_t amount_scale;    /* effects: eight 0x10 steps, with a shared raw-setting ruler */
     uint8_t strip;           /* hold FX: 0x80 | the muted channels (bit per channel); 0 none */
+    uint8_t grey;            /* muted (GREY MUTED): bit k = knob k's column grey, 0x80 = the whole panel */
     uint32_t until_ms;
 } lsdj_ov_bars_t;
 
@@ -264,10 +238,10 @@ static void lsdj_ov_glyph_s(uint16_t *scr, uint32_t x0, uint32_t y0, char c, uin
     uint32_t idx = 0;
     while (lsdj_ov_chars[idx] && lsdj_ov_chars[idx] != c) idx++;
     if (!c || !lsdj_ov_chars[idx]) return;
-    const char *const *g = lsdj_ov_font[idx];
+    const uint8_t *g = lsdj_ov_font[idx];
     for (uint32_t r = 0; r < 7; r++)
         for (uint32_t col = 0; col < 5; col++)
-            if (g[r][col] == '#')
+            if (g[r] & (0x10u >> col))
                 for (uint32_t dy = 0; dy < s; dy++)
                     for (uint32_t dx = 0; dx < s; dx++) {
                         uint32_t x = x0 + col * s + dx, y = y0 + r * s + dy;

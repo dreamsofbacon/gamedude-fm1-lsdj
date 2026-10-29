@@ -20,7 +20,7 @@
    Pure logic: tests/lsdj_midi.c. */
 #pragma once
 #include <stdint.h>
-#include "lsdj_fx.h"
+#include "lsdj_fx_ui.h"   /* the knobs' effects (FXK_*), for CC display and CC out */
 
 enum { LSDJ_MIDI_SRC_USB = 1, LSDJ_MIDI_SRC_TRS = 2, LSDJ_MIDI_SRC_BT = 3 };   /* where a message came from */
 enum { LSDJ_CLK_OFF, LSDJ_CLK_ALL, LSDJ_CLK_USB, LSDJ_CLK_TRS, LSDJ_CLK_BT, LSDJ_CLK_COUNT };
@@ -138,10 +138,32 @@ static int lsdj_midi_cc_apply(lsdj_fx_t *fx, unsigned c, unsigned cc, unsigned v
     lsdj_fx_update(fx);
     return 1;
 }
+/* Returns 1 + the LSDj channel (1..4) the CC was for, 0 if it was none of ours. */
 static int lsdj_midi_cc(const lsdj_midi_t *m, lsdj_fx_t *fx, uint32_t pkt) {
     unsigned ch = (pkt >> 8) & 15u, cc = (pkt >> 16) & 127u, v = (pkt >> 24) & 127u;
     if (!m->cc || ch < m->cc - 1u) return 0;
-    return lsdj_midi_cc_apply(fx, ch - (m->cc - 1u), cc, v);
+    return lsdj_midi_cc_apply(fx, ch - (m->cc - 1u), cc, v) ? (int)(ch - (m->cc - 1u)) + 1 : 0;
+}
+/* The knob effect (FXK_*) of each CC above, in lsdj_midi_cc_num's order (MUTE has none). */
+static const uint8_t lsdj_midi_cc_fxk[LSDJ_MIDI_CCS] = {FXK_TYPE, FXK_RESO, FXK_CUTOFF, FXK_DRIVE, FXK_CRUSH, FXK_DECIM,
+    FXK_SEND, FXK_FXON, FXK_NONE, FXK_ECHO_TIME, FXK_ECHO_FB, FXK_ECHO_MIX, FXK_ECHO_TONE, FXK_ECHO_WOBBLE, FXK_SYNC,
+    FXK_MODE, FXK_FREEZE, FXK_LFO_RATE, FXK_LFO_DEPTH, FXK_WARM, FXK_DIST, FXK_LFO_SHAPE, FXK_LFO_DEST, FXK_COMP};
+/* CC number -> its knob effect, or FXK_NONE. */
+static unsigned lsdj_midi_fxk_of_cc(unsigned cc) {
+    for (unsigned i = 0; i < LSDJ_MIDI_CCS; i++) if (lsdj_midi_cc_num[i] == cc) return lsdj_midi_cc_fxk[i];
+    return FXK_NONE;
+}
+/* ---- CC out (CC OUT): a knob turned on the FM-1 sends its CC, so a DAW can record it.
+   Knob effect k -> its CC number (0: none, e.g. ALL FX) and the CC value that sets it
+   back (choices: the middle of their band; a synced echo time: its note). ---- */
+static unsigned lsdj_midi_cc_of_fxk(unsigned k) {
+    for (unsigned i = 0; i < LSDJ_MIDI_CCS; i++) if (lsdj_midi_cc_fxk[i] == k && k != FXK_NONE) return lsdj_midi_cc_num[i];
+    return 0;
+}
+static unsigned lsdj_midi_cc_value(const lsdj_fx_t *fx, unsigned k, unsigned raw) {
+    unsigned n = lsdj_fxk_choices(k);
+    if (k == FXK_ECHO_TIME && fx->p.m[FXM_SYNC]) { raw = lsdj_fx_note_of(raw); n = LSDJ_FX_NOTES; }
+    return n ? (2u * raw + 1u) * 64u / n : raw;
 }
 
 /* ---- clock out: LSDj leading sends one link byte per MIDI tick (24 a beat), as an Arduinoboy reads it in its

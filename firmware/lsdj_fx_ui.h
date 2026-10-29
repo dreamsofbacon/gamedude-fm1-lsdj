@@ -3,8 +3,9 @@
    the SELECT knob turns the pages. Each change pops up four bars (one per knob,
    lined up under LSDj's four channel columns: firmware/lsdj_overlay.h).
    Tapping FX / SELECT shows the channel pages (FILTER, DRIVE, LFO, LO-FI, ECHO, ECHO MOD:
-   the echo is shared, each channel sends to it); holding FX shows MASTER, with a
-   channel strip: C4-F4 mute PU1 PU2 WAV NOI.
+   the echo is shared, each channel sends to it from FILTER K2, next to its FX on/off);
+   holding FX shows MASTER, with a channel strip: C4-F4 mute PU1 PU2 WAV NOI.
+   SELECT stops at the first and last page (PAGE WRAP on: it goes round).
    Per-channel effects act on the target: the channel under LSDj's cursor by
    default. Packs the setup into 17 32-bit words for the save store (11 before
    alpha 66: still read).
@@ -38,10 +39,10 @@ static const char *const lsdj_fxk_label[FXK_COUNT + 1] = {   /* up to 6 characte
 enum { FX_PAGE_MASTER, FX_PAGE_FILTER, FX_PAGE_DRIVE, FX_PAGE_LFO, FX_PAGE_LOFI, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD };
 static const uint8_t lsdj_fx_page_knob[LSDJ_FX_PAGES][4] = {
     {FXK_ALLON, FXK_COMP, FXK_NONE, FXK_NONE},
-    {FXK_FXON, FXK_TYPE, FXK_CUTOFF, FXK_RESO},
+    {FXK_FXON, FXK_SEND, FXK_CUTOFF, FXK_RESO},   /* FM-1_979: the echo send next to FX on/off */
     {FXK_DRIVE, FXK_DIST, FXK_WARM, FXK_NONE},
     {FXK_LFO_RATE, FXK_LFO_DEPTH, FXK_LFO_SHAPE, FXK_LFO_DEST},
-    {FXK_CRUSH, FXK_DECIM, FXK_SEND, FXK_NONE},
+    {FXK_CRUSH, FXK_DECIM, FXK_TYPE, FXK_NONE},   /* ... and the filter type here (before 979: swapped) */
     {FXK_ECHO_TIME, FXK_ECHO_FB, FXK_ECHO_MIX, FXK_ECHO_TONE},
     {FXK_ECHO_WOBBLE, FXK_SYNC, FXK_MODE, FXK_FREEZE},
 };
@@ -62,9 +63,14 @@ typedef struct {
     uint8_t page;            /* the channel page shown (FX_PAGE_FILTER..FX_PAGE_ECHO_MOD) */
     uint8_t mpage;           /* the master page (FX_PAGE_MASTER) */
     uint8_t held;            /* FX held: the master pages are on the knobs */
+    uint8_t channels;        /* KNOBS = CHANNELS (lsdj_feat.h): K1-K4 = PU1 PU2 WAV NOI, see below */
+    uint8_t param;           /* ... the effect on them (0..LSDJ_FX_CHPARAMS-1), or the ECHO / ECHO MOD page */
 } lsdj_fx_ui_t;
 
-static void lsdj_fx_ui_init(lsdj_fx_ui_t *u) { u->target = LSDJ_FX_CURSOR; u->cursor_ch = 0xFF; u->page = FX_PAGE_FILTER; u->mpage = FX_PAGE_MASTER; u->held = 0; }
+static void lsdj_fx_ui_init(lsdj_fx_ui_t *u) {
+    u->target = LSDJ_FX_CURSOR; u->cursor_ch = 0xFF; u->page = FX_PAGE_FILTER; u->mpage = FX_PAGE_MASTER; u->held = 0;
+    u->channels = 0; u->param = 0;
+}
 /* The two groups of pages, in SELECT order: channel pages, master pages. */
 static const uint8_t lsdj_fx_group[2][6] = {{FX_PAGE_FILTER, FX_PAGE_DRIVE, FX_PAGE_LFO, FX_PAGE_LOFI, FX_PAGE_ECHO, FX_PAGE_ECHO_MOD},
                                            {FX_PAGE_MASTER}};
@@ -73,11 +79,33 @@ static const char *const lsdj_fx_group_letters[2] = {"123456", "1"};   /* the sc
 static int lsdj_fx_is_master(unsigned p) { return p == FX_PAGE_MASTER; }
 /* The page on the knobs: the master page while FX is held. */
 static unsigned lsdj_fx_cur(const lsdj_fx_ui_t *u) { return (u->held ? u->mpage : u->page) % LSDJ_FX_PAGES; }
-/* Its place in its group (0..). */
+/* ---------- KNOBS = CHANNELS ----------
+   The channel pages become one effect at a time on all four channels: K1 PU1, K2 PU2,
+   K3 WAV, K4 NOI. SELECT goes through the per-channel effects in page order, then the
+   shared ECHO and ECHO MOD pages as usual (u->param 14, 15). u->page follows: the page
+   the effect is on (the screen map and the web page show it). */
+#define LSDJ_FX_CHPARAMS 14u
+static const uint8_t lsdj_fx_chparam[LSDJ_FX_CHPARAMS] = {FXK_FXON, FXK_SEND, FXK_CUTOFF, FXK_RESO, FXK_DRIVE, FXK_DIST, FXK_WARM,
+    FXK_LFO_RATE, FXK_LFO_DEPTH, FXK_LFO_SHAPE, FXK_LFO_DEST, FXK_CRUSH, FXK_DECIM, FXK_TYPE};
+static int lsdj_fx_chmode(const lsdj_fx_ui_t *u) { return u->channels && !u->held && u->param < LSDJ_FX_CHPARAMS; }
+/* Its place in its group (0..), and the group's length. */
 static unsigned lsdj_fx_pos(const lsdj_fx_ui_t *u) {
+    if (u->channels && !u->held) return u->param;
     unsigned g = u->held ? 1u : 0u, p = lsdj_fx_cur(u);
     for (unsigned i = 0; i < lsdj_fx_group_n[g]; i++) if (lsdj_fx_group[g][i] == p) return i;
     return 0;
+}
+static unsigned lsdj_fx_count(const lsdj_fx_ui_t *u) {
+    return u->held ? lsdj_fx_group_n[1] : u->channels ? LSDJ_FX_CHPARAMS + 2u : lsdj_fx_group_n[0];
+}
+/* The effect on knob k, and the setup it plays on (KNOBS = CHANNELS: channel k). */
+static unsigned lsdj_fx_knob(const lsdj_fx_ui_t *u, unsigned k) {
+    return lsdj_fx_chmode(u) ? lsdj_fx_chparam[u->param] : lsdj_fx_page_knob[lsdj_fx_cur(u)][k & 3u];
+}
+static lsdj_fx_ui_t lsdj_fx_kui(const lsdj_fx_ui_t *u, unsigned k) {
+    lsdj_fx_ui_t t = *u;
+    if (lsdj_fx_chmode(u)) t.target = (uint8_t)(k & 3u);
+    return t;
 }
 
 static int lsdj_fxk_is_echo(unsigned k) { return k >= FXK_ECHO_TIME && k <= FXK_ECHO_WOBBLE; }
@@ -260,21 +288,32 @@ static void lsdj_fxk_turn(lsdj_fx_t *fx, lsdj_fx_ui_t *u, unsigned k, int steps)
 static int lsdj_fx_knobs(lsdj_fx_t *fx, lsdj_fx_ui_t *u, const int32_t steps[4]) {
     int last = -1;
     for (unsigned k = 0; k < 4; k++) {
-        if (!steps[k] || lsdj_fx_page_knob[lsdj_fx_cur(u)][k] == FXK_NONE) continue;
-        lsdj_fxk_turn(fx, u, lsdj_fx_page_knob[lsdj_fx_cur(u)][k], steps[k]);
+        if (!steps[k] || lsdj_fx_knob(u, k) == FXK_NONE) continue;
+        lsdj_fx_ui_t t = lsdj_fx_kui(u, k);
+        lsdj_fxk_turn(fx, &t, lsdj_fx_knob(u, k), steps[k]);
         last = (int)k;
     }
     return last;
 }
-/* SELECT knob: clicks turn the pages (wrapping). */
 /* The page's four knob names (up to 6 characters), for LSDj's bottom rows. */
 static void lsdj_fx_names(const lsdj_fx_ui_t *u, char names[4][7]) {
-    for (unsigned k = 0; k < 4; k++) lsdj_fx_put(names[k], 0, lsdj_fxk_label[lsdj_fx_page_knob[lsdj_fx_cur(u)][k]]);
+    for (unsigned k = 0; k < 4; k++) lsdj_fx_put(names[k], 0, lsdj_fx_chmode(u) ? lsdj_fx_target_name[k] : lsdj_fxk_label[lsdj_fx_knob(u, k)]);
 }
-static void lsdj_fx_page_turn(lsdj_fx_ui_t *u, int steps) {
-    unsigned g = u->held ? 1u : 0u;   /* within the group shown, wrapping */
-    int n = (int)lsdj_fx_group_n[g], i = ((int)lsdj_fx_pos(u) + steps) % n;
-    uint8_t p = lsdj_fx_group[g][i < 0 ? i + n : i];
+/* SELECT knob: clicks turn the pages within the group shown, stopping at its
+   first and last page; wrap: going round (PAGE WRAP). */
+static void lsdj_fx_page_turn(lsdj_fx_ui_t *u, int steps, int wrap) {
+    unsigned g = u->held ? 1u : 0u;
+    int n = (int)lsdj_fx_count(u), i = (int)lsdj_fx_pos(u) + steps;
+    if (wrap) { i %= n; if (i < 0) i += n; }
+    else i = i < 0 ? 0 : i >= n ? n - 1 : i;
+    if (u->channels && !g) {   /* KNOBS = CHANNELS: the effect, and the page it is on */
+        u->param = (uint8_t)i;
+        if (i >= (int)LSDJ_FX_CHPARAMS) { u->page = i == (int)LSDJ_FX_CHPARAMS ? FX_PAGE_ECHO : FX_PAGE_ECHO_MOD; return; }
+        for (unsigned p = FX_PAGE_FILTER; p < FX_PAGE_ECHO; p++)
+            for (unsigned k = 0; k < 4; k++) if (lsdj_fx_page_knob[p][k] == lsdj_fx_chparam[i]) u->page = (uint8_t)p;
+        return;
+    }
+    uint8_t p = lsdj_fx_group[g][i];
     if (g) u->mpage = p; else u->page = p;
 }
 
@@ -297,12 +336,12 @@ static const char *lsdj_fxk_choice_short(unsigned k, unsigned i) {
     return "";
 }
 static void lsdj_fx_bar_choices(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uint8_t nchoice[4], uint8_t pick[4], char choice[4][6][3]) {
-    unsigned pg = lsdj_fx_cur(u);
     for (unsigned k = 0; k < 4; k++) {
-        unsigned e = lsdj_fx_page_knob[pg][k], n = lsdj_fxk_choices(e);
+        unsigned e = lsdj_fx_knob(u, k), n = lsdj_fxk_choices(e);
+        lsdj_fx_ui_t t = lsdj_fx_kui(u, k);
         nchoice[k] = 0; pick[k] = 0;
         if (n < 2u || n > 6u) continue;
-        nchoice[k] = (uint8_t)n; pick[k] = (uint8_t)lsdj_fxk_get(fx, u, e);
+        nchoice[k] = (uint8_t)n; pick[k] = (uint8_t)lsdj_fxk_get(fx, &t, e);
         for (unsigned i = 0; i < n; i++) { const char *s = lsdj_fxk_choice_short(e, i); choice[k][i][0] = s[0]; choice[k][i][1] = s[1]; choice[k][i][2] = 0; }
     }
 }
@@ -312,24 +351,26 @@ static void lsdj_fx_bar_choices(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, uint
    ("CUTOFF 64"), or with hot < 0 how pages turn. Fields as lsdj_ov_bars_t. */
 static void lsdj_fx_bars(const lsdj_fx_t *fx, const lsdj_fx_ui_t *u, int hot, char title[20], char big[20],
                          char label[4][7], char value[4][6], char caption[4][4], uint8_t level[4]) {
-    unsigned pg = lsdj_fx_cur(u);
-    uint32_t n = lsdj_fx_put(title, 0, lsdj_fx_page_name[pg]);
+    unsigned pg = lsdj_fx_cur(u), cm = (unsigned)lsdj_fx_chmode(u);
+    uint32_t n = lsdj_fx_put(title, 0, cm ? lsdj_fxk_name[lsdj_fx_knob(u, 0)] : lsdj_fx_page_name[pg]);   /* KNOBS = CHANNELS: the effect */
     int chan = 0;
-    for (unsigned k = 0; k < 4; k++) chan |= lsdj_fxk_on_channel(lsdj_fx_page_knob[pg][k]);
-    if (chan) { n = lsdj_fx_put(title, n, " "); n = lsdj_fx_put(title, n, lsdj_fx_target_name[lsdj_fx_eff(u)]); }
-    n = lsdj_fx_put(title, n, " "); n = lsdj_fx_num(title, n, lsdj_fx_pos(u) + 1u); n = lsdj_fx_put(title, n, "/"); lsdj_fx_num(title, n, lsdj_fx_group_n[u->held ? 1 : 0]);
+    for (unsigned k = 0; k < 4; k++) chan |= lsdj_fxk_on_channel(lsdj_fx_knob(u, k));
+    if (chan && !cm) { n = lsdj_fx_put(title, n, " "); n = lsdj_fx_put(title, n, lsdj_fx_target_name[lsdj_fx_eff(u)]); }
+    n = lsdj_fx_put(title, n, " "); n = lsdj_fx_num(title, n, lsdj_fx_pos(u) + 1u); n = lsdj_fx_put(title, n, "/"); lsdj_fx_num(title, n, lsdj_fx_count(u));
     for (unsigned k = 0; k < 4; k++) {
-        unsigned e = lsdj_fx_page_knob[pg][k];
+        unsigned e = lsdj_fx_knob(u, k);
+        lsdj_fx_ui_t t = lsdj_fx_kui(u, k);
         if (e == FXK_NONE) { label[k][0] = value[k][0] = caption[k][0] = 0; level[k] = 0; continue; }
-        lsdj_fx_put(label[k], 0, lsdj_fxk_short[e]);
-        lsdj_fxk_value_short(fx, u, e, value[k]);
+        lsdj_fx_put(label[k], 0, cm ? lsdj_fx_target_name[k] : lsdj_fxk_short[e]);
+        lsdj_fxk_value_short(fx, &t, e, value[k]);
         caption[k][0] = 'K'; caption[k][1] = (char)('1' + k); caption[k][2] = 0;
-        level[k] = (uint8_t)lsdj_fxk_level(fx, u, e);
+        level[k] = (uint8_t)lsdj_fxk_level(fx, &t, e);
     }
-    if (hot >= 0 && hot < 4 && lsdj_fx_page_knob[pg][hot] != FXK_NONE) {
-        unsigned e = lsdj_fx_page_knob[pg][hot];
-        char full[6]; lsdj_fxk_value(fx, u, e, full);
-        const char *name = lsdj_fxk_name[e];
+    if (hot >= 0 && hot < 4 && lsdj_fx_knob(u, (unsigned)hot) != FXK_NONE) {
+        unsigned e = lsdj_fx_knob(u, (unsigned)hot);
+        lsdj_fx_ui_t t = lsdj_fx_kui(u, (unsigned)hot);
+        char full[6]; lsdj_fxk_value(fx, &t, e, full);
+        const char *name = cm ? lsdj_fx_target_name[hot] : lsdj_fxk_name[e];   /* KNOBS = CHANNELS: "K2 PU2 5A" */
         if (name[0] == 'E' && name[1] == 'C' && name[2] == 'H' && name[3] == 'O' && name[4] == ' ') name += 5;
         big[0] = 'K'; big[1] = (char)('1' + hot); big[2] = ' '; big[3] = 0;
         uint32_t m = lsdj_fx_put(big, 3, name);

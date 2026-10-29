@@ -20,8 +20,11 @@ int main(int argc, char **argv) {
             for (const char *c = s; *c; c++) assert(strchr(lsdj_ov_chars, *c));
         }
     assert(sizeof lsdj_ov_font / sizeof lsdj_ov_font[0] == strlen(lsdj_ov_chars));
-    for (unsigned g = 0; g < strlen(lsdj_ov_chars); g++)
-        for (unsigned r = 0; r < 7; r++) assert(strlen(lsdj_ov_font[g][r]) == 5);
+    for (unsigned g = 0; g < strlen(lsdj_ov_chars); g++) {   /* 5 columns; every glyph but space has ink */
+        unsigned ink = 0;
+        for (unsigned r = 0; r < 7; r++) { assert(lsdj_ov_font[g][r] < 0x20u); ink |= lsdj_ov_font[g][r]; }
+        assert(g == 0 ? ink == 0 : ink != 0);
+    }
 
     lsdj_ov_t o; memset(&o, 0, sizeof o);
     const uint16_t grey = 0x5555;

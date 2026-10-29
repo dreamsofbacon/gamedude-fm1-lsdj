@@ -29,9 +29,12 @@
    op 0x16 STORE          settings, effects and custom theme to flash
    op 0x20 LIVE           -> u8 page, u8 cursor channel (0xFF unknown), u16 bpm,
                              u8 mute, u8 freeze, u8 playing (bit per channel),
-                             17 x u32 effects
+                             17 x u32 effects, u8 battery (FM-1_979+: 0..3 bars,
+                             +0x80 on USB power; 0xFF unknown)
    op 0x17 MIDI_GET       -> u32 (firmware/lsdj_midi.h packed)
    op 0x18 MIDI_SET u32   (kept with op 0x16 STORE)
+   op 0x19 FEAT_GET       -> u32 (firmware/lsdj_feat.h packed; FM-1_979+, status 1 before)
+   op 0x1A FEAT_SET u32   (kept with op 0x16 STORE)
    op 0x21 BLUETOOTH      -> 13 x u32 (firmware/lsdj_ble.h lsdj_ble_stat: state, error,
                              packets in / out, SysEx in, bad packets, MTU payload, heap
                              high-water, heap refusals, longest task run, start stage,
@@ -60,12 +63,13 @@
 enum { LSDJ_LINK_INFO = 0x01, LSDJ_LINK_READ, LSDJ_LINK_BEGIN, LSDJ_LINK_CHUNK_OP, LSDJ_LINK_COMMIT, LSDJ_LINK_ABORT,
        LSDJ_LINK_SETTINGS_GET = 0x10, LSDJ_LINK_SETTINGS_SET, LSDJ_LINK_FX_GET, LSDJ_LINK_FX_SET,
        LSDJ_LINK_THEME_GET, LSDJ_LINK_THEME_SET, LSDJ_LINK_STORE, LSDJ_LINK_MIDI_GET, LSDJ_LINK_MIDI_SET,
+       LSDJ_LINK_FEAT_GET, LSDJ_LINK_FEAT_SET,
        LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ, LSDJ_LINK_MUTE_SET };
 #define LSDJ_LINK_BT_STATS 13u
 enum { LSDJ_LINK_OK = 0, LSDJ_LINK_BAD = 1, LSDJ_LINK_STATE = 2, LSDJ_LINK_CRC = 3, LSDJ_LINK_FLASH = 4 };
 
 typedef struct {
-    uint8_t page, cursor_ch, mute, freeze, playing;
+    uint8_t page, cursor_ch, mute, freeze, playing, battery;
     uint16_t bpm;
 } lsdj_link_live_t;
 
@@ -95,6 +99,8 @@ typedef struct {
     int (*midi_set)(uint32_t v);
     const volatile uint8_t *(*cartridge)(uint32_t *len); /* validated immutable slot, or NULL */
     int (*mute_set)(uint8_t mute, uint8_t freeze);   /* 0 if not valid; NULL: not supported (status 1) */
+    uint32_t (*feat_get)(void);                  /* the feature switches; NULL: not supported (status 1) */
+    int (*feat_set)(uint32_t v);
 } lsdj_link_io_t;
 
 typedef struct {
@@ -266,15 +272,22 @@ static uint32_t lsdj_link_handle(lsdj_link_t *s, const lsdj_link_io_t *io, const
         n = lsdj_link_put8(r, n, l.page); n = lsdj_link_put8(r, n, l.cursor_ch); n = lsdj_link_put16(r, n, l.bpm);
         n = lsdj_link_put8(r, n, l.mute); n = lsdj_link_put8(r, n, l.freeze); n = lsdj_link_put8(r, n, l.playing);
         for (unsigned i = 0; i < LSDJ_LINK_FX_WORDS; i++) n = lsdj_link_put32(r, n, w[i]);
+        n = lsdj_link_put8(r, n, l.battery);
         break;
     }
     case LSDJ_LINK_MIDI_GET:
-        if (an || !io->midi_get) { status = LSDJ_LINK_BAD; break; }
-        n = lsdj_link_put32(r, n, io->midi_get());
+    case LSDJ_LINK_FEAT_GET: {
+        uint32_t (*get)(void) = op == LSDJ_LINK_MIDI_GET ? io->midi_get : io->feat_get;
+        if (an || !get) { status = LSDJ_LINK_BAD; break; }
+        n = lsdj_link_put32(r, n, get());
         break;
+    }
     case LSDJ_LINK_MIDI_SET:
-        if (!io->midi_set || !lsdj_link_unpack(args, an, d, 4) || !io->midi_set(lsdj_link_le32(d))) status = LSDJ_LINK_BAD;
+    case LSDJ_LINK_FEAT_SET: {
+        int (*set)(uint32_t) = op == LSDJ_LINK_MIDI_SET ? io->midi_set : io->feat_set;
+        if (!set || !lsdj_link_unpack(args, an, d, 4) || !set(lsdj_link_le32(d))) status = LSDJ_LINK_BAD;
         break;
+    }
     case LSDJ_LINK_MUTE_SET:
         if (!io->mute_set || !lsdj_link_unpack(args, an, d, 2) || !io->mute_set(d[0], d[1])) status = LSDJ_LINK_BAD;
         break;

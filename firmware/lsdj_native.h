@@ -104,6 +104,14 @@ static void lsdj_nat_amount(const lsdj_nat_t *n, unsigned col, unsigned value, u
         }
     }
 }
+/* Grey: everything in the cells but LSDj's background drawn in its light shade
+   (colour 1): a muted channel's controls, still there and still adjustable. */
+static void lsdj_nat_grey(const lsdj_nat_t *n, unsigned col, unsigned row, unsigned w, unsigned h) {
+    uint16_t bg = lsdj_nat_col(n, 0), g = lsdj_nat_col(n, 1);
+    for (unsigned y = row * 8u; y < (row + h) * 8u && y < 144u; y++)
+        for (unsigned x = col * 8u; x < (col + w) * 8u && x < LSDJ_NAT_W; x++)
+            if (n->px[y * LSDJ_NAT_W + x] != bg) n->px[y * LSDJ_NAT_W + x] = g;
+}
 static void lsdj_nat_bars(const lsdj_nat_t *n, const lsdj_ov_bars_t *b, uint16_t accent) {
     lsdj_nat_clear(n, 0, 0, LSDJ_NAT_PANEL, LSDJ_NAT_NAME_ROW);
     lsdj_nat_text(n, 0, 0, b->title, LSDJ_NAT_PANEL, 0);
@@ -150,6 +158,10 @@ static void lsdj_nat_bars(const lsdj_nat_t *n, const lsdj_ov_bars_t *b, uint16_t
             }
         }
     }
+    /* muted: the controls (rows 2..15) grey, the title and the turned knob's line stay */
+    if (b->grey & 0x80u) lsdj_nat_grey(n, 0, LSDJ_NAT_BAR_TOP, LSDJ_NAT_PANEL, LSDJ_NAT_VALUE_ROW + 1u - LSDJ_NAT_BAR_TOP);
+    else for (unsigned k = 0; k < 4u; k++)
+        if ((b->grey >> k) & 1u) lsdj_nat_grey(n, 3u + 3u * k, LSDJ_NAT_BAR_TOP, 2, LSDJ_NAT_VALUE_ROW + 1u - LSDJ_NAT_BAR_TOP);
 }
 
 /* ---------- the knobs' names, with the panel (LSDj's bottom two rows) ----------
@@ -179,6 +191,16 @@ static void lsdj_nat_pagemap(const lsdj_nat_t *n, const char *letters, unsigned 
         int t = lsdj_nat_field_tile(letters[i]);
         lsdj_nat_tile_at(n, LSDJ_NAT_PANEL + i % width, 16 + i / width, i == page ? t + 0x45 : t);
     }
+}
+
+/* ---------- the battery (BATTERY), three cells at (col, row) ----------
+   level 0..3 bars of 3 (the FM-1's thresholds, board.c) as LSDj draws a level:
+   filled cells as value fields, empty ones '-'; "USB" on USB power (0x80: the
+   FM-1 has no charge line; USB powers it). 0xFF: not known, nothing. */
+static void lsdj_nat_battery(const lsdj_nat_t *n, unsigned col, unsigned row, unsigned level) {
+    if (level == 0xFFu) return;
+    if (level & 0x80u) { lsdj_nat_text(n, col, row, "USB", 3, 0); return; }
+    for (unsigned i = 0; i < 3u; i++) lsdj_nat_text(n, col + i, row, i < level ? " " : "-", 1, i < level);
 }
 
 /* ---------- a list (settings), like an LSDj screen ----------

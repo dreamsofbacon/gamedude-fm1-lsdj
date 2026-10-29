@@ -38,8 +38,9 @@ enum { FTL_E_DATA = 0x5A, FTL_E_COMMIT = 0xC3,
                                      `block` (0xFF = record 0, the settings word;
                                      1.. = effects); the newest of each counts.
                                      Older firmware skips this type. */
-#define FTL_RECS 23u   /* records 0..22: 0 settings, 1..11 effects, 12..15 the custom theme, 16 MIDI options,
-                          17..22 the effects' words 11..16 (alpha 66) */
+#define FTL_RECS 24u   /* records 0..23: 0 settings, 1..11 effects, 12..15 the custom theme, 16 MIDI options,
+                          17..22 the effects' words 11..16 (alpha 66), 23 the feature switches (FM-1_979;
+                          older firmware ignores it) */
 
 typedef struct { uint32_t magic, gen, rsv, hcrc; } ftl_hdr_t;
 typedef struct { uint8_t type, block, sector, rsv; uint32_t seq, dcrc, ecrc; } ftl_ent_t;

@@ -13,6 +13,11 @@
    MODE LIGHTS  OFF / ON         a light sweep on entering note / button mode
    BATTERY      OFF / ON         battery level in the FX panel and settings
    FX THEME     MATCH / a theme  the FX panel's colours (MATCH: LSDj's theme); FM-1_980: on SETTINGS / DISPLAY, under THEME
+   AUTOSAVE     OFF / 1 / 5 / 15 MIN  FM-1_981: save the song (and effects) once nothing has changed for 5 s,
+                at most this often, without stopping the music (on SETTINGS' top page)
+
+   x: the stored bits are the value XOR x, so a word saved before the switch existed (0 bits) reads
+   as its default (AUTOSAVE: 1 MIN).
 
    Packed: 'F' (0x46) in bits 24-31. Pure logic: tests/lsdj_feat.c. */
 #pragma once
@@ -20,19 +25,20 @@
 #include "lsdj_theme.h"
 
 enum { LSDJ_FEAT_WRAP, LSDJ_FEAT_GREY, LSDJ_FEAT_MUTEPOP, LSDJ_FEAT_CCSHOW, LSDJ_FEAT_CCOUT, LSDJ_FEAT_CHANNELS,
-       LSDJ_FEAT_KEYLIGHTS, LSDJ_FEAT_ANIM, LSDJ_FEAT_BATTERY, LSDJ_FEAT_THEME, LSDJ_FEAT_ITEMS };
+       LSDJ_FEAT_KEYLIGHTS, LSDJ_FEAT_ANIM, LSDJ_FEAT_BATTERY, LSDJ_FEAT_THEME, LSDJ_FEAT_AUTOSAVE, LSDJ_FEAT_ITEMS };
 #define LSDJ_FEAT_MAGIC 0x46u
-static const struct { const char *name; uint8_t shift, bits, n, def; } lsdj_feat_info[LSDJ_FEAT_ITEMS] = {
-    {"PAGE WRAP", 0, 1, 2, 0}, {"GREY MUTED", 1, 1, 2, 1}, {"MUTE POPUP", 2, 1, 2, 1}, {"SHOW CC", 3, 1, 2, 1},
-    {"CC OUT", 4, 1, 2, 0}, {"KNOBS", 5, 1, 2, 0}, {"PAGE LIGHTS", 6, 1, 2, 1}, {"MODE LIGHTS", 7, 1, 2, 1},
-    {"BATTERY", 8, 1, 2, 1}, {"FX THEME", 9, 7, LSDJ_THEMES + 1u, 0},
+static const struct { const char *name; uint8_t shift, bits, n, def, x; } lsdj_feat_info[LSDJ_FEAT_ITEMS] = {
+    {"PAGE WRAP", 0, 1, 2, 0, 0}, {"GREY MUTED", 1, 1, 2, 1, 0}, {"MUTE POPUP", 2, 1, 2, 1, 0}, {"SHOW CC", 3, 1, 2, 1, 0},
+    {"CC OUT", 4, 1, 2, 0, 0}, {"KNOBS", 5, 1, 2, 0, 0}, {"PAGE LIGHTS", 6, 1, 2, 1, 0}, {"MODE LIGHTS", 7, 1, 2, 1, 0},
+    {"BATTERY", 8, 1, 2, 1, 0}, {"FX THEME", 9, 7, LSDJ_THEMES + 1u, 0, 0}, {"AUTOSAVE", 16, 2, 4, 1, 1},
 };
+static const char *const lsdj_feat_autosave_name[4] = {"OFF", "1 MIN", "5 MIN", "15 MIN"};
 typedef struct { uint8_t v[LSDJ_FEAT_ITEMS]; } lsdj_feat_t;
 
 static void lsdj_feat_defaults(lsdj_feat_t *f) { for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++) f->v[i] = lsdj_feat_info[i].def; }
 static uint32_t lsdj_feat_pack(const lsdj_feat_t *f) {
     uint32_t w = (uint32_t)LSDJ_FEAT_MAGIC << 24;
-    for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++) w |= (uint32_t)f->v[i] << lsdj_feat_info[i].shift;
+    for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++) w |= (uint32_t)(f->v[i] ^ lsdj_feat_info[i].x) << lsdj_feat_info[i].shift;
     return w;
 }
 /* 0 if w is not a packed features word (the defaults are set then). Unused bits must be 0. */
@@ -42,7 +48,7 @@ static int lsdj_feat_unpack(uint32_t w, lsdj_feat_t *f) {
     if (w >> 24 != LSDJ_FEAT_MAGIC) return 0;
     for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++) {
         uint32_t mask = (1u << lsdj_feat_info[i].bits) - 1u;
-        t.v[i] = (uint8_t)((w >> lsdj_feat_info[i].shift) & mask);
+        t.v[i] = (uint8_t)(((w >> lsdj_feat_info[i].shift) & mask) ^ lsdj_feat_info[i].x);
         used |= mask << lsdj_feat_info[i].shift;
         if (t.v[i] >= lsdj_feat_info[i].n) return 0;
     }
@@ -64,7 +70,8 @@ static void lsdj_feat_line(const lsdj_feat_t *f, unsigned item, char line[20]) {
     const char *t[3] = {lsdj_feat_info[item % LSDJ_FEAT_ITEMS].name, ": ", 0};
     unsigned v = f->v[item % LSDJ_FEAT_ITEMS];
     t[2] = item == LSDJ_FEAT_THEME ? (v ? lsdj_theme_name[(v - 1u) % LSDJ_THEMES] : "MATCH")
-         : item == LSDJ_FEAT_CHANNELS ? (v ? "CHANNELS" : "PARAMS") : v ? "ON" : "OFF";
+         : item == LSDJ_FEAT_CHANNELS ? (v ? "CHANNELS" : "PARAMS") : item == LSDJ_FEAT_AUTOSAVE ? lsdj_feat_autosave_name[v & 3u]
+         : v ? "ON" : "OFF";
     uint32_t n = 0;
     for (unsigned k = 0; k < 3; k++) for (const char *c = t[k]; *c && n < 19u; c++) line[n++] = *c;
     line[n] = 0;

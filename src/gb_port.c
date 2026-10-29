@@ -117,6 +117,9 @@ static int16_t pcm[740*2];
 static volatile uint32_t write_pos, read_pos;
 static const uint8_t *cart;
 static uint32_t cart_size, save_size, dirty, error, ready, paused, frames;
+/* AUTOSAVE (FM-1_981): cartridge RAM changes outside [ignore_lo, ignore_hi] (LSDj's play-time
+   clock) are real changes; the frame of the last one. */
+static uint32_t ignore_lo = 1, ignore_hi = 0, dirty_sig, last_sig_frame;
 static uint32_t silent_frames;  /* consecutive frames whose output was exactly zero */
 static uint32_t sample_acc, palette_id, volume = 65;
 static char title[17];
@@ -159,6 +162,7 @@ GP_RAM static void ram_write(struct gb_s *g, uint_fast32_t a, uint8_t v) {
     (void)g;
     if (a < save_size && save[a] != v) {
         save[a] = v; dirty = 1;
+        if (a < ignore_lo || a > ignore_hi) { dirty_sig = 1; last_sig_frame = frames; }
     }
 }
 static void cpu_error(struct gb_s *g, enum gb_error_e e, uint16_t a) {
@@ -533,7 +537,11 @@ void gp_render(uint32_t on) { gb.direct.frame_skip = 0; gb.display.lcd_draw_line
 uint8_t *gp_save_data(void) {return save;}
 uint32_t gp_save_size(void) {return save_size;}
 uint32_t gp_save_dirty(void) {return dirty;}
-void gp_save_clean(void) {dirty=0;}
+void gp_save_clean(void) {dirty=0; dirty_sig=0;}
+void gp_save_ignore(uint32_t lo, uint32_t hi) {ignore_lo=lo; ignore_hi=hi;}
+uint32_t gp_save_dirty_sig(void) {return dirty_sig;}
+void gp_save_mark_dirty(void) {dirty=1; dirty_sig=1;}
+uint32_t gp_save_last_change(void) {return last_sig_frame;}
 uint32_t gp_note_count(void) {return note_count;}
 uint32_t gp_silent_frames(void) {return silent_frames;}
 uint32_t gp_error(void) {return error;}

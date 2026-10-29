@@ -151,6 +151,23 @@ int main(void) {
                 assert(!memcmp(&px[y * 160u + 24u], &expected[y * 160u + 24u], 16u * sizeof(uint16_t)));
         }
     }
-    puts("PASS: LSDj-style drawing: bounds, right panel, font, theme-accent segments at all 128 values, 2-6 choice selections");
+    /* BATTERY (FM-1_981): every level is text, each different, none the blank value field (which looks like
+       LSDj's panel background: a full battery drew nothing visible); unknown draws nothing. */
+    {   static uint16_t cell[6][3 * 8 * 8], blank[3 * 8 * 8];
+        const unsigned lv[6] = {0, 1, 2, 3, 0x83, 0xFF};
+        lsdj_nat_t m = n;
+        for (unsigned i = 0; i < 7; i++) {
+            for (unsigned p = 0; p < 160u * 144u; p++) px[p] = 0x7777;
+            if (i < 6) lsdj_nat_battery(&m, 17, 15, lv[i]); else lsdj_nat_text(&m, 17, 15, "   ", 3, 1);   /* the old filled cells */
+            uint16_t *o = i < 6 ? cell[i] : blank;
+            for (unsigned y = 0; y < 8; y++) memcpy(&o[y * 24], &px[(15 * 8 + y) * 160 + 17 * 8], 24 * sizeof(uint16_t));
+        }
+        for (unsigned i = 0; i < 5; i++) {
+            assert(memcmp(cell[i], blank, sizeof blank));
+            for (unsigned j = i + 1; j < 5; j++) assert(memcmp(cell[i], cell[j], sizeof blank));
+        }
+        for (unsigned k = 0; k < 3 * 64; k++) assert(cell[5][k] == 0x7777);
+    }
+    puts("PASS: LSDj-style drawing: bounds, right panel, font, theme-accent segments at all 128 values, 2-6 choice selections, battery");
     return 0;
 }

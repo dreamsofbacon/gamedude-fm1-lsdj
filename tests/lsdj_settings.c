@@ -67,15 +67,21 @@ int main(int argc, char **argv) {
     const int32_t no[4] = {0, 0, 0, 0}, k1[4] = {1, 0, 0, 0};
     lsdj_menu_open(&m); assert(m.open && !m.changed && m.cursor == 0 && m.page == LSDJ_PAGE_TOP);
     {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l);
-        assert(cnt == 6 && !strcmp(l[0], "SETTINGS") && !strcmp(l[1], "CONTROLS") && !strcmp(l[2], "DISPLAY") && !strcmp(l[3], "MIDI"));
-        assert(!strcmp(l[4], "FX+LIGHTS") && !strcmp(l[5], "SELECT=PICK K1=OPEN")); }
-    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(m.cursor == 3);                       /* stops at FX+LIGHTS */
+        assert(cnt == 7 && !strcmp(l[0], "SETTINGS") && !strcmp(l[1], "CONTROLS") && !strcmp(l[2], "DISPLAY") && !strcmp(l[3], "MIDI"));
+        assert(!strcmp(l[4], "FX+LIGHTS") && !strcmp(l[5], "AUTOSAVE: 1 MIN") && !strcmp(l[6], "SELECT=PICK K1=OPEN")); }
+    /* FM-1_981: AUTOSAVE is set right on the top page (the last line) */
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(m.cursor == 4 && lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_AUTOSAVE));
+    {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "SELECT=PICK K1=SET")); }
+    { int32_t s2[4] = {-1, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 3 && fe.v[LSDJ_FEAT_AUTOSAVE] == 0 && m.page == LSDJ_PAGE_TOP); }
+    { int32_t s2[4] = {9, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 3 && fe.v[LSDJ_FEAT_AUTOSAVE] == 3); }
+    lsdj_feat_defaults(&fe); m.changed = 0;
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); assert(m.cursor == 3);                       /* FX+LIGHTS */
     /* FX+LIGHTS: BACK, then the feature switches in lsdj_feat.h's order; a change returns 3 */
     assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && m.page == LSDJ_PAGE_FEAT && m.cursor == 1);
     assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_WRAP));
     {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l);
-        /* FM-1_980: FX THEME is on DISPLAY (under THEME), not here */
-        assert(cnt == LSDJ_FEAT_ITEMS + 2u && !strcmp(l[0], "SETTINGS/FX+LIGHTS") && !strcmp(l[2], "PAGE WRAP: OFF"));
+        /* FM-1_980: FX THEME is on DISPLAY (under THEME), FM-1_981: AUTOSAVE on the top page; not here */
+        assert(cnt == LSDJ_FEAT_ITEMS + 1u && !strcmp(l[0], "SETTINGS/FX+LIGHTS") && !strcmp(l[2], "PAGE WRAP: OFF"));
         assert(!strcmp(l[3], "GREY MUTED: ON") && !strcmp(l[7], "KNOBS: PARAMS") && !strcmp(l[10], "BATTERY: ON")); }
     /* FM-1_980: the rest of the turn that opened the page changes nothing (it switched PAGE WRAP on);
        a click while waiting starts the wait again */

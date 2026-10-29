@@ -19,7 +19,7 @@ int main(void) {
     assert(!lsdj_feat_unpack(0, &f));
     assert(!f.v[LSDJ_FEAT_WRAP] && f.v[LSDJ_FEAT_GREY] && f.v[LSDJ_FEAT_MUTEPOP] && f.v[LSDJ_FEAT_CCSHOW]);
     assert(!f.v[LSDJ_FEAT_CCOUT] && !f.v[LSDJ_FEAT_CHANNELS] && f.v[LSDJ_FEAT_KEYLIGHTS] && f.v[LSDJ_FEAT_ANIM]);
-    assert(f.v[LSDJ_FEAT_BATTERY] && !f.v[LSDJ_FEAT_THEME] && lsdj_feat_theme(&f, 5) == 5);
+    assert(f.v[LSDJ_FEAT_BATTERY] && !f.v[LSDJ_FEAT_THEME] && lsdj_feat_theme(&f, 5) == 5 && f.v[LSDJ_FEAT_AUTOSAVE] == 1);
     assert(!lsdj_feat_unpack(0x4D000000u, &f));            /* the MIDI word's magic */
     /* The fields do not overlap and fit in bits 0..23. */
     uint32_t used = 0;
@@ -60,6 +60,16 @@ int main(void) {
     lsdj_feat_line(&f, LSDJ_FEAT_THEME, l); assert(!strcmp(l, "FX THEME: MATCH"));
     f.v[LSDJ_FEAT_THEME] = 1; lsdj_feat_line(&f, LSDJ_FEAT_THEME, l);
     assert(!strncmp(l, "FX THEME: ", 10) && !strcmp(l + 10, lsdj_theme_name[0]) && lsdj_feat_theme(&f, 9) == 0);
-    puts("PASS: feature switches: defaults, every value packs, refusals, turning, lines fit for every theme");
+    /* FM-1_981 AUTOSAVE: default 1 MIN, also for a word saved by 979 / 980 (no AUTOSAVE bits);
+       OFF, 5 and 15 MIN round-trip; stored as value XOR 1. */
+    lsdj_feat_defaults(&f); assert(f.v[LSDJ_FEAT_AUTOSAVE] == 1);
+    assert(lsdj_feat_unpack(0x460001CEu, &g) && g.v[LSDJ_FEAT_AUTOSAVE] == 1 && !g.v[LSDJ_FEAT_WRAP]);
+    assert(lsdj_feat_pack(&f) == 0x460001CEu);                  /* the defaults' word is unchanged */
+    f.v[LSDJ_FEAT_AUTOSAVE] = 0; assert(lsdj_feat_pack(&f) == (0x460001CEu | 1u << 16));
+    lsdj_feat_line(&f, LSDJ_FEAT_AUTOSAVE, l); assert(!strcmp(l, "AUTOSAVE: OFF"));
+    f.v[LSDJ_FEAT_AUTOSAVE] = 3; lsdj_feat_line(&f, LSDJ_FEAT_AUTOSAVE, l); assert(!strcmp(l, "AUTOSAVE: 15 MIN"));
+    assert(lsdj_feat_unpack(lsdj_feat_pack(&f), &g) && g.v[LSDJ_FEAT_AUTOSAVE] == 3);
+    f.v[LSDJ_FEAT_AUTOSAVE] = 1; lsdj_feat_line(&f, LSDJ_FEAT_AUTOSAVE, l); assert(!strcmp(l, "AUTOSAVE: 1 MIN"));
+    puts("PASS: feature switches: defaults, every value packs, refusals, turning, lines fit for every theme, autosave");
     return 0;
 }

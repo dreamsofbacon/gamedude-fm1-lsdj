@@ -194,13 +194,14 @@ static void lsdj_nat_pagemap(const lsdj_nat_t *n, const char *letters, unsigned 
 }
 
 /* ---------- the battery (BATTERY), three cells at (col, row) ----------
-   level 0..3 bars of 3 (the FM-1's thresholds, board.c) as LSDj draws a level:
-   filled cells as value fields, empty ones '-'; "USB" on USB power (0x80: the
-   FM-1 has no charge line; USB powers it). 0xFF: not known, nothing. */
+   level 0..3 bars of 3 (the FM-1's thresholds, board.c) as text: "3/3" .. "0/3";
+   "USB" on USB power (0x80: the FM-1 has no charge line; USB powers it). 0xFF: not
+   known, nothing. (FM-1_981: before, filled cells as blank value fields, which look
+   like LSDj's own panel background: a full battery showed nothing.) */
 static void lsdj_nat_battery(const lsdj_nat_t *n, unsigned col, unsigned row, unsigned level) {
     if (level == 0xFFu) return;
-    if (level & 0x80u) { lsdj_nat_text(n, col, row, "USB", 3, 0); return; }
-    for (unsigned i = 0; i < 3u; i++) lsdj_nat_text(n, col + i, row, i < level ? " " : "-", 1, i < level);
+    char t[4] = {(char)('0' + (level & 3u)), '/', '3', 0};
+    lsdj_nat_text(n, col, row, level & 0x80u ? "USB" : t, 3, 0);
 }
 
 /* ---------- a list (settings), like an LSDj screen ----------

@@ -166,14 +166,14 @@ static void master_boot(void){
 }
 /* The battery (FM1_ADC_BATT, PB1's divider), averaged slowly as Felucca does (a new reading
    counts 1/32, every 100 ms); 0 = no reading yet. Felucca's thresholds: battery_level. */
-static int32_t batt_raw;
+static int32_t batt_raw,batt_last=-2;   /* batt_last: the last reading (-1 timeout, -2 none yet), shown on FX+LIGHTS */
 static unsigned battery_level(void);   /* bars and USB power: after the USB driver (below) */
 static void master_poll(void){
     static uint32_t last;static uint8_t tenth;
     uint32_t now=fm1_ticks();if(now-last<240000u)return;last=now;
     int32_t raw=fm1_adc_read(FM1_ADC_MASTER);
     master_raw=raw;if(raw>=0)master_gain=gb_master_gain((uint32_t)raw);
-    if(++tenth>=10u){tenth=0;int32_t b=fm1_adc_read(FM1_ADC_BATT);if(b>0)batt_raw=batt_raw?batt_raw+(b-batt_raw)/32:b;}
+    if(++tenth>=10u){tenth=0;int32_t b=fm1_adc_read(FM1_ADC_BATT);batt_last=b;if(b>0)batt_raw=batt_raw?batt_raw+(b-batt_raw)/32:b;}
 }
 static void recovery_tick(void);
 void gb_scan_irq(void){
@@ -337,11 +337,10 @@ static lsdj_fx_t fx;
 static lsdj_fx_ui_t fxu;
 static uint8_t fx_echo[LSDJ_FX_ECHO_LEN] __attribute__((section(".pool"),aligned(4)));
 static void fx_hook(const int16_t *s,int32_t *l,int32_t *r){lsdj_fx_mix(&fx,s,l,r);}   /* audio interrupt */
-/* FX button: a tap shows the channel pages; held, the master pages (and the
-   channel strip: C4-F4 mute, lsdj_fx_hold_keys), from FX_HOLD_MS or the first knob / key. */
-#define FX_HOLD_MS 250u
-static uint8_t fx_held,fx_used;
-static uint32_t fx_held_since,fx_hold_keys_prev;
+/* FX button (FM-1_981): opens the effects panel and keeps it open until pressed again.
+   On a master page (MASTER, ECHO, ECHO MOD) the channel strip: C4-F4 mute, lsdj_fx_hold_keys. */
+static uint8_t fx_open;
+static uint32_t fx_keys_prev;
 /* Where LSDj keeps the channel under its cursor (kept on the CHAIN and PHRASE
    screens too) and its live tempo, per version, found with harness/find_cursor.c
    and harness/find_tempo.c; the SYNC setting (song RAM offset) and the armed /
@@ -463,9 +462,9 @@ static void fx_bars_fill(void){
     lsdj_fx_bars(&fx,&fxu,bars.hot,bars.title,bars.big,bars.label,bars.value,bars.caption,bars.level);
     lsdj_fx_bar_choices(&fx,&fxu,bars.nchoice,bars.pick,bars.choice);
     bars.amount_scale=1;
-    bars.strip=fxu.held?(uint8_t)(0x80u|fx.mute):0u;
+    bars.strip=lsdj_fx_on_master(&fxu)?(uint8_t)(0x80u|fx.mute):0u;
     bars.grey=0;   /* GREY MUTED: a muted channel's controls (KNOBS = CHANNELS: its column) */
-    if(feat.v[LSDJ_FEAT_GREY]&&!fxu.held)
+    if(feat.v[LSDJ_FEAT_GREY]&&!lsdj_fx_on_master(&fxu))
         for(unsigned k=0;k<4u;k++){
             unsigned ch=fx_knob_chans(k);
             if(ch&&(ch&fx.mute)==ch)bars.grey|=(uint8_t)(lsdj_fx_chmode(&fxu)?1u<<k:0x80u);
@@ -560,6 +559,20 @@ static void save_wait(uint32_t ticks){uint32_t t=fm1_ticks();while(fm1_ticks()-t
 static void save_blink(unsigned n,uint32_t ticks){
     for(unsigned i=0;i<n;i++){fm1_led_key(SAVE_BUTTON,0);save_wait(ticks);fm1_led_key(SAVE_BUTTON,1);save_wait(ticks);}
 }
+/* The save with LSDj stopped: LSDj (and CPU1's video) paused, erases allowed. quiet: an
+   autosave, no messages unless it fails. */
+static void stopped_save(int quiet){
+    fm1_led_key(SAVE_BUTTON,0);
+    video_hold();   /* CPU1 parked, not stopped (multicore_video.h) */
+    if(!quiet)ov_now(LSDJ_MSG_SAVING);
+    int rc=ftl_save_now(&ftl,gp_save_data());
+    if(rc>=0){int fr=fx_store();if(fr<0)rc=-1;else if(rc==0&&fr>0)rc=1;}   /* and the effects */
+    video_release();
+    if(rc>=0)gp_save_clean();
+    if(rc<0||!quiet)lsdj_ov_say(&ov,rc>0?LSDJ_MSG_SAVED:rc==0?LSDJ_MSG_NO_CHANGES:LSDJ_MSG_SAVE_FAILED,fm1_ms);
+    fm1_led_key(SAVE_BUTTON,1);
+    if(rc<0)save_blink(5,1200000u);
+}
 /* SAVE button. Nothing writes flash in the background: SAVE pauses LSDj (and
    the CPU1 video job), writes the changed 4 KiB blocks of cartridge RAM through
    the power-cut-safe store, and resumes. Only while LSDj is stopped (0.5 s of
@@ -570,16 +583,23 @@ static void save_blink(unsigned n,uint32_t ticks){
    step (~1-2 ms), never an erase (those wait for a SAVE with the song stopped).
    Each block is snapshotted when its turn comes. */
 static int play_save,settings_pending;
+static uint8_t play_save_quiet;      /* an autosave: no messages unless it fails */
+static uint32_t play_save_change;    /* gp_save_last_change() when it began */
+/* Saved: no unsaved change left, unless LSDj changed something while the save ran. */
+static void save_cleaned(uint32_t change_at_start){
+    int again=gp_save_last_change()!=change_at_start;
+    gp_save_clean();if(again)gp_save_mark_dirty();
+}
 static void play_save_done(int ok){
     if(ok){   /* the effects setup with it */
         if(core1_park(960000u)){if(fx_store()<0)ok=0;core1_unpark();}else ok=0;
     }
     play_save=0;fm1_led_key(SAVE_BUTTON,1);
-    if(ok)gp_save_clean();
+    if(ok)save_cleaned(play_save_change);
     if(settings_pending){   /* settings changed while the save ran */
         settings_pending=0;video_hold();(void)settings_store();video_release();
     }
-    lsdj_ov_say(&ov,ok?LSDJ_MSG_SAVED:LSDJ_MSG_SAVE_FAILED,fm1_ms);
+    if(!ok||!play_save_quiet)lsdj_ov_say(&ov,ok?LSDJ_MSG_SAVED:LSDJ_MSG_SAVE_FAILED,fm1_ms);
     if(!ok)save_blink(5,1200000u);
 }
 static void play_save_step(void){
@@ -590,39 +610,55 @@ static void play_save_step(void){
     if(r<0)play_save_done(0);
     else if(!ftl_busy(&ftl))play_save_done(1);
 }
-static int play_save_start(void){
-    uint32_t mask=ftl_changed(&ftl,gp_save_data());
+static int play_save_start(int quiet){
+    uint32_t change=gp_save_last_change(),mask=ftl_changed(&ftl,gp_save_data());
     if(!mask&&!ftl.retry){   /* the song is saved; maybe the effects are not */
         int fr=-1;
         if(core1_park(960000u)){fr=fx_store();core1_unpark();}
-        lsdj_ov_say(&ov,fr<0?LSDJ_MSG_SAVE_FAILED:fr?LSDJ_MSG_SAVED:LSDJ_MSG_NO_CHANGES,fm1_ms);
+        if(fr>=0)save_cleaned(change);
+        if(fr<0||!quiet)lsdj_ov_say(&ov,fr<0?LSDJ_MSG_SAVE_FAILED:fr?LSDJ_MSG_SAVED:LSDJ_MSG_NO_CHANGES,fm1_ms);
         return 1;
     }
     int rc=ftl_begin(&ftl,mask);
     if(rc==-2){ftl.retry=0;return 0;}         /* would need an erase: only with the song stopped */
     if(rc){lsdj_ov_say(&ov,LSDJ_MSG_SAVE_FAILED,fm1_ms);return 1;}
-    play_save=1;fm1_led_key(SAVE_BUTTON,0);
-    lsdj_ov_say(&ov,LSDJ_MSG_SAVING_PLAYING,fm1_ms);
+    play_save=1;play_save_quiet=(uint8_t)quiet;play_save_change=change;fm1_led_key(SAVE_BUTTON,0);
+    if(!quiet)lsdj_ov_say(&ov,LSDJ_MSG_SAVING_PLAYING,fm1_ms);
     return 1;
 }
 static void lsdj_save_button(void){
     if(play_save)return;                      /* already saving */
     if(gp_silent_frames()<SILENT_FRAMES){
         if(!recovery_flash_ok){lsdj_ov_say(&ov,LSDJ_MSG_SAVE_FAILED,fm1_ms);save_blink(5,1200000u);return;}
-        if(play_save_start())return;
+        if(play_save_start(0))return;
         lsdj_ov_say(&ov,LSDJ_MSG_SAVE_PLAYING,fm1_ms);save_blink(2,7200000u);return;   /* flash full: stop first */
     }
     if(!recovery_flash_ok){lsdj_ov_say(&ov,LSDJ_MSG_SAVE_FAILED,fm1_ms);save_blink(5,1200000u);return;}
-    fm1_led_key(SAVE_BUTTON,0);
-    video_hold();   /* CPU1 parked, not stopped (multicore_video.h) */
-    ov_now(LSDJ_MSG_SAVING);
-    int rc=ftl_save_now(&ftl,gp_save_data());
-    if(rc>=0){int fr=fx_store();if(fr<0)rc=-1;else if(rc==0&&fr>0)rc=1;}   /* and the effects */
-    video_release();
-    if(rc>=0)gp_save_clean();
-    lsdj_ov_say(&ov,rc>0?LSDJ_MSG_SAVED:rc==0?LSDJ_MSG_NO_CHANGES:LSDJ_MSG_SAVE_FAILED,fm1_ms);
-    fm1_led_key(SAVE_BUTTON,1);
-    if(rc<0)save_blink(5,1200000u);
+    stopped_save(0);
+}
+/* AUTOSAVE (lsdj_feat.h, FM-1_981): once nothing has changed for AUTOSAVE_QUIET_FRAMES, at most
+   every 1 / 5 / 15 minutes: the song (and the effects) saved quietly, as the save-while-playing
+   (a step a frame, no erases: nothing pauses, the music goes on). If the store needs an erase
+   first, it waits until the song is stopped (then saves as SAVE does, LSDj paused a moment).
+   SAVE light off while writing. */
+#define AUTOSAVE_QUIET_FRAMES 300u   /* 5 s */
+static uint32_t autosave_last;       /* fm1_ms of the last autosave */
+static int fx_changed(void){         /* the effects differ from their saved records */
+    uint32_t w[LSDJ_FX_WORDS];lsdj_fx_pack(&fx,&fxu,w);
+    for(unsigned i=0;i<LSDJ_FX_WORDS;i++){unsigned r=FX_REC(i);if(!((ftl.rec_has>>r)&1u)||ftl.rec[r]!=w[i])return 1;}
+    return 0;
+}
+static void autosave_poll(void){
+    static const uint32_t every_ms[4]={0,60000u,300000u,900000u};
+    uint32_t every=every_ms[feat.v[LSDJ_FEAT_AUTOSAVE]&3u];
+    if(!every||play_save||!recovery_flash_ok||menu.open||fm1_ms-autosave_last<every)return;
+    int song=(int)gp_save_dirty_sig();
+    if(song&&gp_frame_count()-gp_save_last_change()<AUTOSAVE_QUIET_FRAMES)return;   /* still editing */
+    if(!song&&!fx_changed())return;
+    autosave_last=fm1_ms;
+    if(play_save_start(1))return;           /* stopped or playing: written a step a frame, nothing paused */
+    if(gp_silent_frames()>=SILENT_FRAMES)stopped_save(1);   /* needs an erase: with the song stopped */
+    else autosave_last=fm1_ms-every+10000u;  /* ... playing: look again in 10 s */
 }
 /* At boot, before LSDj's first frame (sound is silent here, so erases are
    fine): load the autosave (SAVE light blinks 3 times). Without one, import the
@@ -632,6 +668,7 @@ static void lsdj_save_button(void){
 static int songs_loaded;   /* shown once the game picture is up */
 static void lsdj_save_boot(void){
     unsigned blinks=0;
+    gp_save_ignore(0x3FB3u,0x3FB8u);   /* LSDj 9.3.9's play-time clock: not a change for AUTOSAVE */
     if(ftl_boot(&ftl,gp_save_data()))blinks=3;
     else if(recovery_flash_ok){
         uint8_t keep[FTL_N];memset(keep,0,sizeof keep);
@@ -755,7 +792,7 @@ static void native_draw(void){
         else lsdj_fx_names(&fxu,names);
         lsdj_nat_bars(&n,&bars,ft->accent);
         if(!own){
-            lsdj_nat_pagemap(&n,lsdj_fx_group_letters[fxu.held?1:0],fxu.channels&&!fxu.held?lsdj_fx_cur(&fxu)-FX_PAGE_FILTER:lsdj_fx_pos(&fxu));   /* the pages of the group, in the screen map */
+            lsdj_nat_pagemap(&n,lsdj_fx_order_letters,lsdj_fx_index(lsdj_fx_cur(&fxu)));   /* the pages, in the screen map */
             if(feat.v[LSDJ_FEAT_BATTERY])lsdj_nat_battery(&n,17,15,battery_level());   /* BATTERY: after "FX" */
         }
         lsdj_nat_names(&n,(const char(*)[7])names,bars.hot);
@@ -766,6 +803,12 @@ static void native_draw(void){
         unsigned cnt=lsdj_menu_lines(&menu,&settings,&midi,&feat,hint?menu_hint:0,lines);   /* the open page */
         lsdj_nat_list(&n,(const char(*)[20])lines,cnt,(int)menu.cursor);
         if(feat.v[LSDJ_FEAT_BATTERY])lsdj_nat_battery(&n,17,1,battery_level());   /* BATTERY: the blank row under the title */
+        if(menu.page==LSDJ_PAGE_FEAT){   /* the battery's ADC reading (to check BATTERY on a real FM-1): "BATT ADC 0597" */
+            char t[14]="BATT ADC ----";int32_t v=batt_last;
+            if(v==-1){t[9]='T';t[10]='I';t[11]='M';t[12]='E';}
+            else if(v>=0)for(int i=12;i>=9;i--){t[i]=(char)('0'+v%10);v/=10;}
+            lsdj_nat_text(&n,0,1,t,13,0);
+        }
     }
     if(lsdj_ov_active(&ov,fm1_ms))lsdj_nat_message(&n,ov.line[0],ov.line[1]);
     else ov.until_ms=0;
@@ -978,8 +1021,11 @@ static void fx_knobs_after(const int32_t st[4]){
 static uint32_t page_light(void){
     static const uint8_t key[6]={8,10,13,15,17,20},scr[6]={4,3,1,6,5,2};
     unsigned i=6;
-    if(!feat.v[LSDJ_FEAT_KEYLIGHTS]||fxu.held)return 0;
-    if(lsdj_ov_bars_active(&bars,fm1_ms)&&!cue.held&&!tempo.held)i=lsdj_fx_cur(&fxu)-FX_PAGE_FILTER;
+    if(!feat.v[LSDJ_FEAT_KEYLIGHTS])return 0;
+    if(lsdj_ov_bars_active(&bars,fm1_ms)&&!cue.held&&!tempo.held){   /* the channel pages (master pages: the mute lights) */
+        if(lsdj_fx_on_master(&fxu))return 0;
+        i=lsdj_fx_cur(&fxu)-FX_PAGE_FILTER;
+    }
     else if(screen_addr){uint8_t s=gp_wram_peek(screen_addr);for(i=0;i<6u&&scr[i]!=s;i++);}
     return i<6u?1u<<key[i]:0u;
 }
@@ -1015,23 +1061,21 @@ static void fm1_input_frame(void){
         bars.amount_scale=0;
         bars.hot=-1;bars.chan=-1;bars.grey=0;lsdj_ov_bars_keep(&bars,fm1_ms);
     }
-    if(fx_held&&!fxu.held&&(fm1_ms-fx_held_since>=FX_HOLD_MS||enc[0]||enc[2]||enc[3]||enc[4]||enc[5]||(key_lo&~fx_hold_keys_prev)))
-        {fxu.held=1;bars.hot=-1;}   /* held (or used): the master pages, the hint until a knob turns */
     {   /* KNOB 1-4 (encoders 2-5): the page's four effects */
         int32_t st[4]={enc[2],enc[3],enc[4],enc[5]};
         int k=lsdj_fx_knobs(&fx,&fxu,st);
-        if(k>=0){fx_knobs_after(st);fx_bars_show(k);if(fx_held)fx_used=1;}   /* FX + knob is not a tap */
+        if(k>=0){fx_knobs_after(st);fx_bars_show(k);}
     }
     if(enc[0]){   /* SELECT knob (encoder 0): effects pages, stopping at the ends (PAGE WRAP: round) */
         lsdj_fx_page_turn(&fxu,(int)enc[0],feat.v[LSDJ_FEAT_WRAP]);fx_bars_show(-1);
-        if(fx_held)fx_used=1;
     }
-    if(!cue.held&&!tempo.held&&lsdj_ov_bars_active(&bars,fm1_ms))fx_bars_fill();
-    if(fx_held){   /* FX held: the master pages and the channel strip; LSDj gets no input meanwhile */
-        uint32_t down=key_lo&~fx_hold_keys_prev;fx_hold_keys_prev=key_lo;
+    if(fx_open&&!cue.held&&!tempo.held)lsdj_ov_bars_keep(&bars,fm1_ms);   /* FX pressed: open until FX again */
+    int fx_shown=!cue.held&&!tempo.held&&lsdj_ov_bars_active(&bars,fm1_ms);
+    if(fx_shown)fx_bars_fill();
+    uint32_t keys_down=key_lo&~fx_keys_prev;fx_keys_prev=key_lo;
+    if(fx_shown&&lsdj_fx_on_master(&fxu)){   /* a master page: the channel strip; LSDj gets no input meanwhile */
         uint8_t before=fx.mute;
-        if(down&&lsdj_fx_hold_keys(&fx,down)){fx_used=1;mute_mark(before,1);}
-        if(fxu.held){fx_bars_fill();lsdj_ov_bars_keep(&bars,fm1_ms);}
+        if(keys_down&&lsdj_fx_hold_keys(&fx,keys_down)){mute_mark(before,1);fx_bars_fill();}
         piano_set(lsdj_fx_hold_lights(&fx));
         gp_buttons(sync_btn);return;
     }
@@ -1220,17 +1264,12 @@ void gb_cstart(const uint32_t *parameters){
             if(panel&~prev_panel&(1u<<SEQ_BUTTON))seq_button();
             if(songrow_addr&&((panel^prev_panel)&(1u<<ARP_BUTTON)))cue_button((panel>>ARP_BUTTON)&1u);
             if((panel^prev_panel)&(1u<<EDIT_BUTTON))tempo_button((panel>>EDIT_BUTTON)&1u);
-            if(panel&~prev_panel&(1u<<FX_BUTTON)&&!menu.open){
-                fx_held=1;fx_used=0;fx_held_since=fm1_ms;fx_hold_keys_prev=key_lo;
-            }
-            if(fx_held&&!(panel&(1u<<FX_BUTTON))){   /* released: a tap toggles the page */
-                int tap=!fx_used&&fm1_ms-fx_held_since<FX_HOLD_MS;
-                fx_held=0;fxu.held=0;
-                if(tap&&!menu.open)fx_bars_show(-1);   /* a tap: the channel pages */
-                else bars.until_ms=0;                  /* let go: the master pages close */
+            if(panel&~prev_panel&(1u<<FX_BUTTON)&&!menu.open){   /* FX: the panel open / closed */
+                if(fx_open){fx_open=0;bars.until_ms=0;}
+                else{fx_open=1;fx_bars_show(-1);}
             }
             if(panel&~prev_panel&(1u<<GLO_BUTTON)){
-                if(!menu.open){lsdj_menu_open(&menu);bars.until_ms=0;}   /* the effects pop-up goes */
+                if(!menu.open){lsdj_menu_open(&menu);fx_open=0;bars.until_ms=0;}   /* the effects panel goes */
                 else{
                     menu.open=0;
                     if(menu.changed){   /* keep them: a 16-byte record, the emulator parked meanwhile */
@@ -1278,7 +1317,7 @@ void gb_cstart(const uint32_t *parameters){
             uint32_t f=gp_core1.frames;
             if(f!=seen_frames){
                 fm1_input_frame();
-                play_save_step();
+                play_save_step();autosave_poll();
                 uint32_t busy=gp_core1.busy_ticks;
                 cpu.emu+=busy-seen_busy;cpu.frames+=f-seen_frames;
                 if(gp_core1.last_ticks>cpu.worst)cpu.worst=gp_core1.last_ticks;
@@ -1315,7 +1354,7 @@ void gb_cstart(const uint32_t *parameters){
             gp_frame();
             lsdj_cpu_frame(&cpu,fm1_ticks()-t0);worked=1;
 #if !GB_SMK37
-            play_save_step();
+            play_save_step();autosave_poll();
 #endif
             cpu.snd+=gp_snd_take_ticks();cpu.renders+=gp_snd_take_renders();
         }

@@ -63,6 +63,12 @@ uint8_t *gp_save_data(void);
 uint32_t gp_save_size(void);
 uint32_t gp_save_dirty(void);
 void gp_save_clean(void);
+/* Autosave support: real changes ignore cartridge RAM [lo, hi]; whether there was one since
+   the last clean; mark one; the frame of the last one (gp_frame_count). */
+void gp_save_ignore(uint32_t lo, uint32_t hi);
+uint32_t gp_save_dirty_sig(void);
+void gp_save_mark_dirty(void);
+uint32_t gp_save_last_change(void);
 /* Autosave support: real changes ignore cartridge RAM [lo, hi]; frame of the last
    real change; notes started so far (NRx4 triggers). */
 uint32_t gp_note_count(void);

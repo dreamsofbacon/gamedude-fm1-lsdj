@@ -37,8 +37,17 @@ int main(void) {
     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_OK && s.cursor_addr == 0xC41D);
     win[148] = 0; reseal();
     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_OK && s.cursor_addr == 0);
-    win[148] = 2; reseal();
-    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
+    assert(s.profile == 0 && s.tempo_addr == 0);
+    /* profile 2: another known LSDj, its cursor and tempo bytes in the header */
+    win[148] = 2; put16(win + 149, 0xC41E); put16(win + 151, 0xC52A); reseal();
+    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_OK && s.profile == 2 && s.cursor_addr == 0xC41E && s.tempo_addr == 0xC52A);
+    put16(win + 151, 0); reseal();
+    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_OK && s.cursor_addr == 0xC41E && s.tempo_addr == 0);
+    put16(win + 149, 0x8000); reseal();   assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);   /* not WRAM */
+    put16(win + 149, 0); reseal();        assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
+    put16(win + 149, 0xC41E); put16(win + 151, 0xFF00); reseal(); assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
+    win[148] = 1; put16(win + 151, 0); reseal(); assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);   /* addresses only with 2 */
+    win[148] = 3; put16(win + 149, 0); reseal(); assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
 
     build(); win[0] = 'X';                     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_HEADER);
     build(); win[30] ^= 1;                     assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_HEADER);
@@ -54,6 +63,6 @@ int main(void) {
     build(); win[20 + 8] = 0xff; reseal();    assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_LAYOUT);
     build(); win[LSDJ_SLOT_HDR + 40000] ^= 1;  assert(lsdj_slot_parse(win, CAP, &s) == LSDJ_SLOT_BAD_DATA);
     assert(lsdj_slot_parse(win, 100, &s) == LSDJ_SLOT_BAD_LAYOUT);
-    puts("PASS: LSDj slot: empty, valid, bad magic/CRC/version, bad map, oversize, corrupt data");
+    puts("PASS: LSDj slot: empty, valid, profiles 0/1/2, bad magic/CRC/version, bad map, oversize, corrupt data");
     return 0;
 }

@@ -11,8 +11,11 @@
      14  u16 kits kept (information only)
      16  u32 CRC32 of the stored banks
      20  u8  bank_map[128]: logical bank -> stored bank, 0xFF = absent (reads 0xFF)
-     148 u8 cursor profile: 0 = unknown, 1 = verified LSDj 9.3.9 program
-     149 zero padding
+     148 u8 cursor profile: 0 = unknown, 1 = verified LSDj 9.3.9 program (every helper),
+            2 = another known LSDj (the web page's list): only the two addresses below
+     149 u16 profile 2: LSDj's cursor channel byte (WRAM, 0xC000..0xDFFF)
+     151 u16 profile 2: LSDj's tempo byte (WRAM, or 0 = none)
+     153 zero padding (149..152 too, profiles 0 and 1)
      252 u32 CRC32 of bytes 0..251
      256 stored banks
    Pure logic, so it runs in the firmware and in tests/lsdj_slot.c. */
@@ -29,7 +32,9 @@ enum { LSDJ_SLOT_OK = 0, LSDJ_SLOT_EMPTY = -1, LSDJ_SLOT_BAD_HEADER = -2,
 
 typedef struct {
     uint32_t logical_banks, stored_banks, kits;
-    uint16_t cursor_addr;
+    uint8_t profile;          /* byte 148 */
+    uint16_t cursor_addr;     /* 0 = unknown (profile 1: 0xC41D) */
+    uint16_t tempo_addr;      /* profile 2 only (profile 1: board.c's table) */
     uint8_t bank_map[LSDJ_SLOT_MAX_BANKS];
 } lsdj_slot_t;
 
@@ -58,8 +63,17 @@ static int lsdj_slot_parse(const volatile uint8_t *w, uint32_t capacity, lsdj_sl
     for (unsigned i = 0; i < 8; i++) if (w[i] != (uint8_t)magic[i]) return LSDJ_SLOT_BAD_HEADER;
     if (lsdj_slot_u16(w + 8) != LSDJ_SLOT_VERSION ||
         lsdj_slot_u32(w + 252) != lsdj_slot_crc32(0, w, 252)) return LSDJ_SLOT_BAD_HEADER;
-    if (w[148] > 1u) return LSDJ_SLOT_BAD_LAYOUT;
+    if (w[148] > 2u) return LSDJ_SLOT_BAD_LAYOUT;
+    s->profile = w[148];
     s->cursor_addr = w[148] == 1u ? 0xC41Du : 0;
+    s->tempo_addr = 0;
+    {
+        uint32_t c = lsdj_slot_u16(w + 149), t = lsdj_slot_u16(w + 151);
+        if (w[148] == 2u) {
+            if (c < 0xC000u || c > 0xDFFFu || (t && (t < 0xC000u || t > 0xDFFFu))) return LSDJ_SLOT_BAD_LAYOUT;
+            s->cursor_addr = (uint16_t)c; s->tempo_addr = (uint16_t)t;
+        } else if (c || t) return LSDJ_SLOT_BAD_LAYOUT;
+    }
     s->logical_banks = lsdj_slot_u16(w + 10);
     s->stored_banks = lsdj_slot_u16(w + 12);
     s->kits = lsdj_slot_u16(w + 14);

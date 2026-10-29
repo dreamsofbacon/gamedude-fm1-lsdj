@@ -364,8 +364,10 @@ static void cursor_detect(void){
     /* Generic builds: the browser marks the slot with profile 1 only when the program
        banks' SHA-256 matches the verified LSDj 9.3.9 program (lsdj_slot.h byte 148), never
        by title. Every address below comes from that program, so all of them apply;
-       unknown programs keep every helper off. */
-    const int verified=cart_slot.cursor_addr==known[0].cursor;
+       unknown programs keep every helper off. Profile 2 (FM-1_986): another LSDj on the web page's
+       list (custom palettes and kits allowed): its cursor and tempo bytes from the slot, nothing else. */
+    const int verified=cart_slot.profile==1u;
+    if(cart_slot.profile==2u){cursor_addr=cart_slot.cursor_addr;tempo_addr=cart_slot.tempo_addr;return;}
 #endif
     const char *t=gp_title();
     for(unsigned i=0;i<sizeof known/sizeof known[0];i++){

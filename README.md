@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_985). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_986). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,17 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: cursor FX on other LSDj versions (FM-1_986)
+
+- **The effects follow LSDj's cursor on more LSDj versions.** The web page recognises a
+  program by its code banks (0-7, 1B-1F) with the palette colours (bank 1) and palette
+  names (bank 1B) blanked, so custom palettes and kits (blank kit slots too) keep the
+  match. LSDj 9.3.9 that way: every helper (slot byte 148 = 1). LSDj 9.4.0, 9.2.L, 9.1.C,
+  8.4.9, 8.4.2 and 4.6.2: slot byte 148 = 2 with the cursor and tempo bytes at 149 and
+  151 (found with harness/find_cursor.c and find_tempo.c), so cursor-following effects
+  and the LFO tempo work; SEQ live mode, tempo editing, cues and MIDI sync still need
+  LSDj 9.3.9 (src/lsdj_slot.h, cursor_detect in firmware/board.c).
 
 ## LSDj Burrito: faster screen mirror (FM-1_985)
 
@@ -162,9 +173,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_985 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_986 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_985 for alpha 85).
+Normal ROM builds use the current alpha identity (FM-1_986 for alpha 86).
 
 From this repository in WSL:
 

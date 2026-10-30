@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_991). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_992, package identity FM-1_5370992). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,15 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: its own firmware number (FM-1_992)
+
+- **Package identity FM-1_5370992** (FM-1_ + our prefix 537 + a 4-digit version; tools/build.py
+  LSDJ_SLOT_PRODUCT). The FM-1_9NN numbers used up to FM-1_991 are shared with other firmwares on
+  The Firmware Hub, so updaters could not tell them apart. Felucca's updater reports it as is (up to
+  27 characters); the web installer takes FM-1_ + 3 to 15 digits and knows FM-1_537 + 4 digits as
+  LSDJ Burrito. The short name FM-1_992 (LSDJ_VERSION, CART_SLOT_VERSION, BURRITO_VERSION) stays in
+  the web page's link INFO (8 bytes) and on the splash; template.json carries both (product, version).
 
 ## LSDj Burrito: every sample kit fits (FM-1_991)
 
@@ -229,9 +238,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_991 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_992 (package identity FM-1_5370992) LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_991 for alpha 91).
+Local ROM builds (never published) keep FM-1_9NN in firmware/fm1_recovery.h.
 
 From this repository in WSL:
 

@@ -844,7 +844,7 @@ static int lk_store(void){
 }
 static int lk_load(void){return ftl_boot(&ftl,gp_save_data())?0:-1;}
 static void lk_reset(void){gp_reset();}
-static const char *lk_firmware(void){return FELUCCA_ID;}
+static const char *lk_firmware(void){return BURRITO_VERSION;}   /* "FM-1_992": the package identity is longer */
 static const char *lk_title(void){return gp_title();}
 static int lk_live_known(void){return cursor_addr!=0;}
 /* The battery as bars of 3 (Felucca's thresholds 531 / 561 / 591), +0x80 on USB power (a host
@@ -1166,7 +1166,7 @@ static void boot_splash(int display_ok){
 #if GB_SMK37
             gd_splash_draw(screen,ms);
 #else
-            lsdj_splash_draw(screen,ms,gd_splash_y(ms)-84,FELUCCA_ID,&splash_col);
+            lsdj_splash_draw(screen,ms,gd_splash_y(ms)-84,BURRITO_VERSION,&splash_col);
 #endif
             display_frame();next_draw=ms+33u;
             if(ms>=GD_SPLASH_LAND_MS)landing_frame=1;

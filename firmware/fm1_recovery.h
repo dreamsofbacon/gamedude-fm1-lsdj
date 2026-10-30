@@ -6,12 +6,16 @@
 #define FELUCCA_CDC 0
 #define FELUCCA_UAC 0
 #define FELUCCA_OTA_DRYRUN 0
-/* Package identity, reported to M-UPGRADE: "FM-1_" + exactly 3 digits (4 = "incompatible"),
-   newer number to update in place. LSDj alpha N = FM-1_9NN (alpha 12 = FM-1_912). Bump per release. */
+/* Package identity, reported to M-UPGRADE: "FM-1_" + 3 digits there (M-VAVE's app may call longer ones "incompatible"),
+   newer number to update in place. LSDj alpha N = FM-1_9NN (alpha 12 = FM-1_912) up to FM-1_991; from FM-1_992 the
+   web template's package identity is FM-1_537 + 4 digits (FM-1_5370992; tools/build.py), longer than 3 digits:
+   Felucca's updater and the web installer take it (up to 20 characters). Bump per release. */
 #ifdef CART_SLOT_CAPACITY
-#define FELUCCA_ID CART_SLOT_PRODUCT
+#define FELUCCA_ID CART_SLOT_PRODUCT   /* the package identity: FM-1_537 + version (FM-1_992 on) */
+#define BURRITO_VERSION CART_SLOT_VERSION   /* the short name: link INFO (8 bytes) and the splash */
 #else
 #define FELUCCA_ID "FM-1_976"
+#define BURRITO_VERSION FELUCCA_ID
 #endif
 #define RING_PUBLISH() __asm__ volatile("csync" ::: "memory")
 /* The flash driver may also write the LSDj save pool (lsdj_state.h, 0x97000..0xE0000 =

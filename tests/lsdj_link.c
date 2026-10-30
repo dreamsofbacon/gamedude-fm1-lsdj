@@ -280,10 +280,37 @@ int main(void) {
       rn = lsdj_link_handle(&st, &io984, w, sizeof w, 0, reply); assert(reply[5] == LSDJ_LINK_BAD);
       rn = lsdj_link_handle(&st, &io_old, w, sizeof w, 0, reply); assert(reply[5] == LSDJ_LINK_BAD);
       w[3] = LSDJ_LINK_SCREEN_PIXELS; rn = lsdj_link_handle(&st, &io, w, 4, 0, reply); assert(reply[5] == LSDJ_LINK_BAD); }   /* never asked */
+    /* FM-1_990 push: SCREEN_SYNC's force bit 31 reaches the stream; each new picture's SCREEN_FRAME */
+    { uint8_t q[5 + 2 * LSDJ_LINK_SCREEN_BANDS] = {0}; le32(q, LSDJ_LINK_PUSH | 1u); q[sizeof q - 1] = 5;
+      assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q, 0) == LSDJ_LINK_OK && (stream_bands & LSDJ_LINK_PUSH) && (stream_bands & 1u));
+      assert(rd32(4 + 2 * LSDJ_LINK_SCREEN_BANDS) & 1u && !(rd32(4 + 2 * LSDJ_LINK_SCREEN_BANDS) & LSDJ_LINK_PUSH));   /* the reply: bands only */
+      lsdj_link_push_t p = {0}; uint8_t m[LSDJ_LINK_REPLY_MAX]; uint32_t bands; uint16_t h[LSDJ_LINK_SCREEN_BANDS];
+      assert(!lsdj_link_push_frame(&p, scaled(), 5, 0, m, &bands, h) && !bands);                 /* not pushing */
+      lsdj_link_push_start(&p, scaled(), 5, 126, 1000);
+      assert(p.on && p.round == 126 && !lsdj_link_push_frame(&p, scaled(), 5, 1100, m, &bands, h));   /* the same picture */
+      assert(!lsdj_link_push_frame(&p, scaled(), 6, 1100, m, &bands, h) && p.shown == 6);       /* new, unchanged: nothing */
+      pic[9 * 8 * LSDJ_LINK_SCREEN_W + 3 * LSDJ_LINK_SCREEN_W + 3] ^= 0xFFFFu;                   /* band 9 changes */
+      uint32_t n = lsdj_link_push_frame(&p, scaled(), 70000, 1200, m, &bands, h);
+      assert(bands == 1u << 9 && n == 7u + (32u + 18u + 16u * LSDJ_LINK_SCREEN_BANDS + 6u) / 7u + 1u && n <= 60u);
+      assert(m[0] == 0xF0 && m[4] == LSDJ_LINK_SCREEN_FRAME && m[5] == 0 && m[6] == 127 && m[n - 1] == 0xF7);
+      { uint32_t acc = 0, bits = 0, i = 7; uint32_t v[4 + LSDJ_LINK_SCREEN_BANDS]; const unsigned w[4] = {16, 16, 16, 2};
+        for (unsigned f = 0; f < 4u + LSDJ_LINK_SCREEN_BANDS; f++) {
+            unsigned wd = f < 4 ? w[f] : 16u;
+            while (bits < wd) { assert(m[i] < 128); acc |= (uint32_t)m[i++] << bits; bits += 7; }
+            v[f] = acc & ((1u << wd) - 1u); acc >>= wd; bits -= wd; }
+        assert(i == n - 1u && (v[0] | v[1] << 16) == 70000u && (v[2] | v[3] << 16) == 1u << 9);
+        for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) assert(v[4 + b] == lsdj_link_band_hash(scaled(), b)); }
+      assert(lsdj_link_push_sent(&p, 70000, bands, h) == 127 && p.hash[9] == h[9] && p.shown == 70000);
+      assert(!lsdj_link_push_frame(&p, scaled(), 70001, 1300, m, &bands, h));                   /* sent: the page has it */
+      pic[0] ^= 0xFFFFu;
+      assert(lsdj_link_push_frame(&p, scaled(), 70002, 1300, m, &bands, h) && bands == 1u && m[6] == 0);   /* round wraps */
+      assert(lsdj_link_push_sent(&p, 70002, bands, h) == 0);
+      pic[0] ^= 0xFFFFu;
+      assert(!lsdj_link_push_frame(&p, scaled(), 70003, 1000 + LSDJ_LINK_PUSH_MS + 1, m, &bands, h) && !p.on); }   /* not renewed */
     /* Junk */
     assert(req(0x7E, 0, 0, 0) == LSDJ_LINK_BAD);
     assert(req(LSDJ_LINK_INFO, (const uint8_t[1]){1}, 1, 0) == LSDJ_LINK_BAD);
     { uint8_t q[4] = {0x7d, 'G', 'D', 1}; assert(!lsdj_link_match(q, 4)); }
-    puts("PASS: web link: info, song export/import (crc, flash, order, timeout), settings, effects, theme, store, live, screen, screen sync");
+    puts("PASS: web link: info, song export/import (crc, flash, order, timeout), settings, effects, theme, store, live, screen, screen sync, screen push");
     return 0;
 }

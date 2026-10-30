@@ -68,6 +68,14 @@
                              colours - 1, colours x u16 RGB565, then 160 colour indices
                              of 0 (one colour), 1, 2, 3 or 4 bits. More than 16
                              colours: status 2 and the row only.
+   FM-1_990 (USB): SCREEN_SYNC with force bit 31 = push. The FM-1 then also sends each new picture by
+   itself, for LSDJ_LINK_PUSH_MS after that SYNC (the page renews it every second): when its picture
+   changes, after the rows still going out,
+   op 0x29 SCREEN_FRAME   sent, never asked: F0 7D 'G' 'S' 29 00 round bits F7 (bits as SCREEN_PIXELS:
+                             u32 pictures shown, 18 bits bands that follow, 18 x u16 hashes), then
+                             those bands' rows (SCREEN_PIXELS, this round). Round: the SYNC's + 1, + 2 ...
+                             (low 7 bits). The FM-1 counts the rows as arrived; a page that lost some
+                             sends SCREEN_SYNC again (with the hashes it holds).
    status 0 ok, 1 bad request, 2 wrong state, 3 crc mismatch, 4 flash error.
    An import with no CHUNK / COMMIT for LSDJ_LINK_TIMEOUT_MS is aborted.
    Pure logic, the hardware through lsdj_link_io_t: tests/lsdj_link.c. */
@@ -87,11 +95,14 @@ enum { LSDJ_LINK_INFO = 0x01, LSDJ_LINK_READ, LSDJ_LINK_BEGIN, LSDJ_LINK_CHUNK_O
        LSDJ_LINK_THEME_GET, LSDJ_LINK_THEME_SET, LSDJ_LINK_STORE, LSDJ_LINK_MIDI_GET, LSDJ_LINK_MIDI_SET,
        LSDJ_LINK_FEAT_GET, LSDJ_LINK_FEAT_SET,
        LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ, LSDJ_LINK_MUTE_SET,
-       LSDJ_LINK_SCREEN_INFO, LSDJ_LINK_SCREEN_ROW, LSDJ_LINK_SCREEN_SYNC, LSDJ_LINK_SCREEN_PIXELS };
+       LSDJ_LINK_SCREEN_INFO, LSDJ_LINK_SCREEN_ROW, LSDJ_LINK_SCREEN_SYNC, LSDJ_LINK_SCREEN_PIXELS,
+       LSDJ_LINK_SCREEN_FRAME };
 #define LSDJ_LINK_SCREEN_W     160u
 #define LSDJ_LINK_SCREEN_H     144u
 #define LSDJ_LINK_SCREEN_BANDS 18u   /* LSDj's character rows */
 #define LSDJ_LINK_BT_STATS 13u
+#define LSDJ_LINK_PUSH     0x80000000u   /* SCREEN_SYNC force bit 31 (FM-1_990) */
+#define LSDJ_LINK_PUSH_MS  3000u
 enum { LSDJ_LINK_OK = 0, LSDJ_LINK_BAD = 1, LSDJ_LINK_STATE = 2, LSDJ_LINK_CRC = 3, LSDJ_LINK_FLASH = 4 };
 
 typedef struct {
@@ -128,7 +139,8 @@ typedef struct {
     uint32_t (*feat_get)(void);                  /* the feature switches; NULL: not supported (status 1) */
     int (*feat_set)(uint32_t v);
     const volatile uint16_t *(*screen)(uint32_t *shown); /* the LCD image (lsdj_link_px); NULL: not supported (status 1) */
-    int (*screen_stream)(uint32_t bands, uint8_t round); /* send these bands' rows after this reply (SCREEN_SYNC);
+    int (*screen_stream)(uint32_t bands, uint8_t round); /* send these bands' rows after this reply (SCREEN_SYNC;
+                                                    bit 31: LSDJ_LINK_PUSH, FM-1_990);
                                                     0 over a link that cannot (status 1); NULL: not supported */
 } lsdj_link_io_t;
 
@@ -188,6 +200,40 @@ static uint32_t lsdj_link_screen_pixels(const volatile uint16_t *px, unsigned y,
     if (b.bits) r[b.n++] = (uint8_t)(b.acc & 127u);
     r[b.n++] = 0xf7;
     return b.n;
+}
+
+/* FM-1_990 push (USB): what the page holds once the rows sent have arrived. */
+typedef struct { uint16_t hash[LSDJ_LINK_SCREEN_BANDS]; uint32_t shown, until; uint8_t on, round; } lsdj_link_push_t;
+/* SCREEN_SYNC with the push bit: its rows bring the page to this picture. */
+static void lsdj_link_push_start(lsdj_link_push_t *p, const volatile uint16_t *px, uint32_t shown, uint8_t round, uint32_t now_ms) {
+    for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) p->hash[b] = lsdj_link_band_hash(px, b);
+    p->shown = shown; p->round = round; p->until = now_ms + LSDJ_LINK_PUSH_MS; p->on = 1;
+}
+/* A new picture (shown moved on): the SCREEN_FRAME message for the bands that changed, its length
+   (0: nothing to send; push over, or the same picture). bands and h: for lsdj_link_push_sent. */
+static uint32_t lsdj_link_push_frame(lsdj_link_push_t *p, const volatile uint16_t *px, uint32_t shown, uint32_t now_ms,
+                                     uint8_t *r, uint32_t *bands, uint16_t h[LSDJ_LINK_SCREEN_BANDS]) {
+    *bands = 0;
+    if (!p->on) return 0;
+    if ((int32_t)(now_ms - p->until) > 0) { p->on = 0; return 0; }   /* the page stopped renewing it */
+    if (shown == p->shown) return 0;
+    for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) { h[b] = lsdj_link_band_hash(px, b); if (h[b] != p->hash[b]) *bands |= 1u << b; }
+    if (!*bands) { p->shown = shown; return 0; }
+    lsdj_link_bits_t k = {r, 0, 0, 0};
+    r[k.n++] = 0xf0; r[k.n++] = 0x7d; r[k.n++] = 'G'; r[k.n++] = 'S'; r[k.n++] = LSDJ_LINK_SCREEN_FRAME;
+    r[k.n++] = 0; r[k.n++] = (uint8_t)((p->round + 1u) & 127u);
+    lsdj_link_bits(&k, shown & 0xFFFFu, 16); lsdj_link_bits(&k, shown >> 16, 16);
+    lsdj_link_bits(&k, *bands & 0xFFFFu, 16); lsdj_link_bits(&k, *bands >> 16, 2);
+    for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) lsdj_link_bits(&k, h[b], 16);
+    if (k.bits) r[k.n++] = (uint8_t)(k.acc & 127u);
+    r[k.n++] = 0xf7;
+    return k.n;
+}
+/* The SCREEN_FRAME went out: its bands count as the page's; the next rows go with this round. */
+static uint8_t lsdj_link_push_sent(lsdj_link_push_t *p, uint32_t shown, uint32_t bands, const uint16_t h[LSDJ_LINK_SCREEN_BANDS]) {
+    for (unsigned b = 0; b < LSDJ_LINK_SCREEN_BANDS; b++) if (bands >> b & 1u) p->hash[b] = h[b];
+    p->shown = shown; p->round = (uint8_t)((p->round + 1u) & 127u);
+    return p->round;
 }
 
 typedef struct {
@@ -411,7 +457,7 @@ static uint32_t lsdj_link_handle(lsdj_link_t *s, const lsdj_link_io_t *io, const
             n = lsdj_link_put16(r, n, hb);
             if ((force >> b & 1u) || hb != (uint16_t)(d[4 + 2 * b] | d[5 + 2 * b] << 8)) send |= 1u << b;
         }
-        if (!io->screen_stream(send, d[4 + 2 * LSDJ_LINK_SCREEN_BANDS])) { status = LSDJ_LINK_BAD; n = 6; break; }
+        if (!io->screen_stream(send | (force & LSDJ_LINK_PUSH), d[4 + 2 * LSDJ_LINK_SCREEN_BANDS])) { status = LSDJ_LINK_BAD; n = 6; break; }
         n = lsdj_link_put32(r, n, send);
         break;
     }

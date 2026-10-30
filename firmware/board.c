@@ -928,7 +928,13 @@ static const volatile uint16_t *lk_screen(uint32_t *shown){*shown=display_count;
    it goes first (USB sends SysEx before MIDI): a note waits at most what is queued, ~4 ms. */
 static uint32_t scr_bands;static uint8_t scr_row,scr_round,link_ble;
 static uint8_t link_reply[LSDJ_LINK_REPLY_MAX];
-static int lk_screen_stream(uint32_t bands,uint8_t round){if(link_ble)return 0;scr_bands=bands;scr_row=0;scr_round=round;return 1;}
+/* FM-1_990: with the push bit the FM-1 also sends each new picture by itself (screen_push). */
+static lsdj_link_push_t scr_push;
+static int lk_screen_stream(uint32_t bands,uint8_t round){
+    if(link_ble)return 0;
+    if(bands&LSDJ_LINK_PUSH)lsdj_link_push_start(&scr_push,screen,display_count,round,fm1_ms);else scr_push.on=0;
+    scr_bands=bands&~LSDJ_LINK_PUSH;scr_row=0;scr_round=round;return 1;
+}
 #define SCR_QUEUE 24u   /* packets: two USB transfers' worth */
 static void screen_stream(void){
     for(unsigned rows=0;scr_bands&&rows<12u;rows++){
@@ -943,6 +949,16 @@ static void screen_stream(void){
         if(!(scr_row&7u))scr_bands&=~(1u<<(y>>3));
         if(ota_wire_send(link_reply,n)){scr_bands=0;return;}   /* USB gone */
     }
+}
+/* Pushing: a new picture on the LCD, the last one's rows all out: its SCREEN_FRAME, then its rows. */
+static void screen_push(void){
+    if(!scr_push.on||scr_bands||link_ble||scr_push.shown==display_count)return;
+    uint32_t queued=so_w-so_r,bands;uint16_t h[LSDJ_LINK_SCREEN_BANDS];
+    if(queued>SCR_QUEUE||(queued&&mo_w!=mo_r)||queued+22u>SXQ)return;   /* a SCREEN_FRAME: 58 bytes */
+    uint32_t n=lsdj_link_push_frame(&scr_push,screen,display_count,fm1_ms,link_reply,&bands,h);
+    if(!n)return;
+    if(ota_wire_send(link_reply,n)){scr_push.on=0;return;}   /* USB gone */
+    scr_round=lsdj_link_push_sent(&scr_push,display_count,bands,h);scr_bands=bands;scr_row=0;
 }
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,
@@ -1281,7 +1297,7 @@ void gb_cstart(const uint32_t *parameters){
         master_poll();
 #endif
         recovery_service();
-        screen_stream();
+        screen_push();screen_stream();
         lsdj_link_poll(&link_state,&link_io,fm1_ms);   /* an import whose page went away */
 #if LSDJ_BLE
         ble_frame();

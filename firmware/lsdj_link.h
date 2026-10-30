@@ -47,7 +47,9 @@
    Cartridge export reads immutable application data only; never saves, arbitrary
    addresses, flash writes or pauses. Both operations refuse during save import.
    The screen (FM-1_983+; status 1 before): the 160x144 picture the LCD shows, panels
-   included, read while it is drawn (a row may tear; the next read fixes it); read only:
+   included; read only. FM-1_987: read back from the LCD image (io->screen: 240x216, the
+   picture scaled A,A,B, byte-swapped as the LCD takes it), which holds finished frames
+   only (983-986 read the emulator's picture while the next frame was drawn into it):
    op 0x25 SCREEN_INFO    -> u32 pictures shown, 18 x u16 hashes (one per 8-row band)
    op 0x26 SCREEN_ROW u8 row (0..143) -> u8 row, u8 colours (1..16), colours x u16
                              RGB565 (as the LCD), 80 bytes: pixel 2i low nibble,
@@ -125,16 +127,30 @@ typedef struct {
     int (*mute_set)(uint8_t mute, uint8_t freeze);   /* 0 if not valid; NULL: not supported (status 1) */
     uint32_t (*feat_get)(void);                  /* the feature switches; NULL: not supported (status 1) */
     int (*feat_set)(uint32_t v);
-    const volatile uint16_t *(*screen)(uint32_t *shown); /* the 160x144 picture; NULL: not supported (status 1) */
+    const volatile uint16_t *(*screen)(uint32_t *shown); /* the LCD image (lsdj_link_px); NULL: not supported (status 1) */
     int (*screen_stream)(uint32_t bands, uint8_t round); /* send these bands' rows after this reply (SCREEN_SYNC);
                                                     0 over a link that cannot (status 1); NULL: not supported */
 } lsdj_link_io_t;
 
+/* Picture pixel (x, y) from the LCD image: 240x216, LCD row y' shows picture row y'*2/3 (so
+   picture row y is LCD row ceil(3y/2)), columns A,A,B (x even: 3*(x/2), odd: +2), bytes
+   swapped for the LCD (src/video_job.h gb_video_scale). */
+#define LSDJ_LINK_LCD_W 240u
+static inline uint16_t lsdj_link_px(const volatile uint16_t *lcd, unsigned x, unsigned y) {
+    uint16_t c = lcd[((3u * y + 1u) >> 1) * LSDJ_LINK_LCD_W + 3u * (x >> 1) + ((x & 1u) << 1)];
+    return (uint16_t)(c >> 8 | c << 8);
+}
 /* One band's hash (FNV-1a over the pixels, folded to 16 bits). */
 static uint16_t lsdj_link_band_hash(const volatile uint16_t *px, unsigned band) {
     uint32_t h = 2166136261u;
-    const volatile uint16_t *p = px + band * 8u * LSDJ_LINK_SCREEN_W;
-    for (unsigned i = 0; i < 8u * LSDJ_LINK_SCREEN_W; i++) { h ^= p[i]; h *= 16777619u; }
+    for (unsigned y = band * 8u; y < band * 8u + 8u; y++) {   /* = lsdj_link_px, a row at a time */
+        const volatile uint16_t *row = px + ((3u * y + 1u) >> 1) * LSDJ_LINK_LCD_W;
+        for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x += 2u, row += 3) {
+            uint16_t a = row[0], b = row[2];
+            h ^= (uint16_t)(a >> 8 | a << 8); h *= 16777619u;
+            h ^= (uint16_t)(b >> 8 | b << 8); h *= 16777619u;
+        }
+    }
     return (uint16_t)(h ^ h >> 16);
 }
 
@@ -142,7 +158,7 @@ static uint16_t lsdj_link_band_hash(const volatile uint16_t *px, unsigned band) 
 static unsigned lsdj_link_row_colours(const volatile uint16_t *px, unsigned y, uint16_t pal[16], uint8_t k[LSDJ_LINK_SCREEN_W]) {
     unsigned np = 0;
     for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) {
-        uint16_t c = px[y * LSDJ_LINK_SCREEN_W + x]; unsigned i = 0;   /* read once: indices match the colours */
+        uint16_t c = lsdj_link_px(px, x, y); unsigned i = 0;   /* read once: indices match the colours */
         while (i < np && pal[i] != c) i++;
         if (i == np) { if (np == 16u) return 0; pal[np++] = c; }
         k[x] = (uint8_t)i;

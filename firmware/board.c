@@ -915,8 +915,11 @@ static int lk_mute_set(uint8_t m,uint8_t f){   /* the web page's channel buttons
 }
 static uint32_t lk_feat_get(void){return lsdj_feat_pack(&feat);}
 static int lk_feat_set(uint32_t v){lsdj_feat_t t;if(!lsdj_feat_unpack(v,&t))return 0;feat=t;feat_apply();return 1;}
-/* The screen mirror: the 160x144 picture as last shown (native_draw drew the panels into it). */
-static const volatile uint16_t *lk_screen(uint32_t *shown){*shown=display_count;return gp_pixels();}
+/* The screen mirror: the LCD image as last shown (lsdj_link_px reads the 160x144 picture back
+   from it). FM-1_987: not gp_pixels(), which CPU1 draws the next frame into as soon as the
+   panels are scaled out (the page then saw torn or missing panels). The main loop writes
+   `screen` only right before display_frame, and SCREEN_SYNC / screen_stream run in it too. */
+static const volatile uint16_t *lk_screen(uint32_t *shown){*shown=display_count;return screen;}
 /* SCREEN_SYNC (USB only): the bands asked for go a row at a time from the main loop, each
    only once the SysEx queue is empty (notes wait at most one row, ~1 ms). */
 static uint32_t scr_bands;static uint8_t scr_row,scr_round,link_ble;
@@ -928,7 +931,7 @@ static void screen_stream(void){
     if(scr_row>=LSDJ_LINK_SCREEN_H){scr_bands=0;return;}
     unsigned y=scr_row++;
     if(!(scr_row&7u))scr_bands&=~(1u<<(y>>3));
-    if(ota_wire_send(link_reply,lsdj_link_screen_pixels(gp_pixels(),y,scr_round,link_reply)))scr_bands=0;   /* USB gone */
+    if(ota_wire_send(link_reply,lsdj_link_screen_pixels(screen,y,scr_round,link_reply)))scr_bands=0;   /* USB gone */
 }
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,

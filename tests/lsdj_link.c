@@ -45,7 +45,16 @@ static uint32_t feat_word = 0x460001C6u;
 static uint32_t io_eget(void) { return feat_word; }
 static int io_eset(uint32_t v) { if (v >> 24 != 0x46) return 0; feat_word = v; return 1; }
 static uint16_t pic[LSDJ_LINK_SCREEN_W * LSDJ_LINK_SCREEN_H];
-static const volatile uint16_t *io_screen(uint32_t *shown) { *shown = 4242; return pic; }
+/* FM-1_987: the link reads the LCD image; this scales pic as src/video_job.h gb_video_scale does. */
+static uint16_t lcd_img[240u * 216u];
+static const uint16_t *scaled(void) {
+    for (unsigned y = 0; y < 216u; y++) for (unsigned x = 0; x < 240u; x++) {
+        uint16_t c = pic[(y * 2u / 3u) * LSDJ_LINK_SCREEN_W + (x / 3u) * 2u + (x % 3u == 2u)];
+        lcd_img[y * 240u + x] = (uint16_t)(c >> 8 | c << 8);
+    }
+    return lcd_img;
+}
+static const volatile uint16_t *io_screen(uint32_t *shown) { *shown = 4242; return scaled(); }
 static uint32_t stream_bands = 0xDEAD; static int stream_ok = 1;   /* 0: as over Bluetooth */
 static uint8_t stream_round;
 static int io_stream(uint32_t bands, uint8_t round) { if (!stream_ok) return 0; stream_bands = bands; stream_round = round; return 1; }
@@ -248,20 +257,20 @@ int main(void) {
       uint8_t m[LSDJ_LINK_REPLY_MAX]; uint16_t px[LSDJ_LINK_SCREEN_W]; unsigned status;
       uint32_t most = 0;
       for (unsigned y = 0; y < LSDJ_LINK_SCREEN_H; y++) {
-          uint32_t n = lsdj_link_screen_pixels(pic, y, 99, m);
+          uint32_t n = lsdj_link_screen_pixels(scaled(), y, 99, m);
           assert(unpixels(m, n, px, &status) == (int)y && status == 0 && !memcmp(px, pic + y * LSDJ_LINK_SCREEN_W, sizeof px));
           if (n > most) most = n;
       }
       assert(most == 7u + (8u + 4u + 5u * 16u + 160u * 3u + 6u) / 7u + 1u);   /* row 143: 5 colours, 3 bits */
-      assert(lsdj_link_screen_pixels(pic, 0, 99 | 128, m) == 7u + (8u + 4u + 4u * 16u + 320u + 6u) / 7u + 1u);
+      assert(lsdj_link_screen_pixels(scaled(), 0, 99 | 128, m) == 7u + (8u + 4u + 4u * 16u + 320u + 6u) / 7u + 1u);
       for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) pic[3 * LSDJ_LINK_SCREEN_W + x] = 0x1234u;
-      { uint32_t n = lsdj_link_screen_pixels(pic, 3, 99 | 128, m); assert(n == 7u + 4u + 1u && unpixels(m, n, px, &status) == 3 && px[99] == 0x1234u); }
+      { uint32_t n = lsdj_link_screen_pixels(scaled(), 3, 99 | 128, m); assert(n == 7u + 4u + 1u && unpixels(m, n, px, &status) == 3 && px[99] == 0x1234u); }
       for (unsigned x = 0; x < LSDJ_LINK_SCREEN_W; x++) pic[4 * LSDJ_LINK_SCREEN_W + x] = (uint16_t)((x * 3u % 16u) * 0x1111u);
-      { uint32_t n = lsdj_link_screen_pixels(pic, 4, 99 | 128, m); assert(n == 7u + (8u + 4u + 256u + 640u + 6u) / 7u + 1u && n <= 138u);
+      { uint32_t n = lsdj_link_screen_pixels(scaled(), 4, 99 | 128, m); assert(n == 7u + (8u + 4u + 256u + 640u + 6u) / 7u + 1u && n <= 138u);
         assert(unpixels(m, n, px, &status) == 4 && status == 0 && !memcmp(px, pic + 4 * LSDJ_LINK_SCREEN_W, sizeof px)); }
       pic[4 * LSDJ_LINK_SCREEN_W + 5] = 0xBEEF;   /* 17 colours: status 2, the row only */
-      { uint32_t n = lsdj_link_screen_pixels(pic, 4, 99 | 128, m); assert(unpixels(m, n, px, &status) == 4 && status == 2 && n == 7u + 2u + 1u); }
-      { uint32_t n = lsdj_link_screen_pixels(pic, 143, 99 | 128, m); assert(unpixels(m, n, px, &status) == 143); }   /* row > 127: 8 bits */
+      { uint32_t n = lsdj_link_screen_pixels(scaled(), 4, 99 | 128, m); assert(unpixels(m, n, px, &status) == 4 && status == 2 && n == 7u + 2u + 1u); }
+      { uint32_t n = lsdj_link_screen_pixels(scaled(), 143, 99 | 128, m); assert(unpixels(m, n, px, &status) == 143); }   /* row > 127: 8 bits */
       /* refused: a link that cannot stream (Bluetooth), wrong length, firmware before FM-1_985 */
       stream_ok = 0; stream_bands = 77; assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q, 0) == LSDJ_LINK_BAD && rn == 7 && stream_bands == 77); stream_ok = 1;
       assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q - 1, 0) == LSDJ_LINK_BAD && req(LSDJ_LINK_SCREEN_SYNC, 0, 0, 0) == LSDJ_LINK_BAD);

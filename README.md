@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_986). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_987). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,18 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: screen mirror without torn panels, 30 a second (FM-1_987)
+
+- **The web page's screen mirror no longer shows torn or missing panels.** FM-1_983-986
+  read the emulator's picture (gp_pixels), which CPU1 starts drawing the next frame into as
+  soon as the panels are scaled out, so rows sent later could lack the FX panel or menu.
+  The mirror now reads the LCD image (`screen`, written by the main loop only right before
+  display_frame, the loop the mirror runs in): lsdj_link_px reads picture pixel (x, y) back
+  from it (row ceil(3y/2), columns A,A,B, bytes swapped). No RAM added; the page's protocol
+  is unchanged. harness/mirror_tear_emu.mjs: with panels up the old source differed from
+  the LCD in about 1 sample in 15 (up to 121 rows), the LCD image never.
+- The page looks for changes every 33 ms (was 50) over USB: 30 a second.
 
 ## LSDj Burrito: cursor FX on other LSDj versions (FM-1_986)
 
@@ -173,9 +185,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_986 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_987 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_986 for alpha 86).
+Normal ROM builds use the current alpha identity (FM-1_987 for alpha 87).
 
 From this repository in WSL:
 

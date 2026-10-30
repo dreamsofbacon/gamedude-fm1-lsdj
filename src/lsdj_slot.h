@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LSDj ROM slot. The public firmware template carries an empty (all 0xFF)
-   cartridge window; the web installer (web/lsdj/lsdj-firmware.js) writes the
+   cartridge window; the web installer (site/lsdj/lsdj-firmware.js) writes the
    user's own trimmed LSDj into it. Nothing here contains or needs a ROM.
 
    Window layout, little endian:

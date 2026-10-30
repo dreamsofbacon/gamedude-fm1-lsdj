@@ -5,8 +5,6 @@ __pycache__/
 *.gbc
 *.zip
 /HANDOFF.md
-/web/catalog.json
-!/web/diagnostic.gb
 # Local experiment, device administration and one-time import helpers.
 /tools/brand.py
 /tools/device.py
@@ -17,15 +15,9 @@ __pycache__/
 /tools/import_recovery.py
 /tools/import_sources.py
 /tools/studio.py
-/tools/web_service.py
 /tools/validate_rom.mjs
-/web/studio.html
-/web/style.css
-/web/library.css
 
 # Audited freely redistributable stock cartridges and corresponding source only.
-!/web/homebrew/*.gb
-!/web/homebrew/sources/gb-wordyl-1.0.8-e0f7440.zip
 
 # LSDj fork: never commit ROM-bearing packages or song files.
 *.fwsc

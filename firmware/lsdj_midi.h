@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* MIDI options (the MIDI part of the settings list, kept in save-store record 16):
 
-   CLOCK IN   OFF / ALL / USB / TRS / BT   where clock and Start/Stop are taken from
+   CLOCK IN   OFF / ALL / USB / TRS         where clock and Start/Stop are taken from
    TRANSPORT  ON / OFF                     Start / Continue / Stop press LSDj's START
                                             (off: start and stop by hand; the clock still
                                             drives LSDj while it plays)
@@ -12,19 +12,21 @@
                                             mode (LSDj SYNC = KEYBD)
    CC FX      OFF / CH 1..13                CCs move the effects: channel N = PU1, N+1 PU2,
                                             N+2 WAV, N+3 NOI (lsdj_midi_cc_map)
-   CLOCK OUT  OFF / USB / BT / USB+BT      LSDj leading (SYNC = LSDJ, playing): MIDI clock,
+   CLOCK OUT  OFF / USB                    LSDj leading (SYNC = LSDJ, playing): MIDI clock,
                                             Start and Stop out, each tick when it is heard
    PC CUE     OFF / ON                      a program change n (any channel) cues song row n
 
    Defaults are alpha 56's behaviour: clock from everywhere, transport on, 100 ms.
+   FM-1_994 has no Bluetooth: a saved CLOCK IN BT reads as ALL, CLOCK OUT BT as OFF and
+   USB+BT as USB (the values those builds stored: 4, 2, 3).
    Pure logic: tests/lsdj_midi.c. */
 #pragma once
 #include <stdint.h>
 #include "lsdj_fx_ui.h"   /* the knobs' effects (FXK_*), for CC display and CC out */
 
-enum { LSDJ_MIDI_SRC_USB = 1, LSDJ_MIDI_SRC_TRS = 2, LSDJ_MIDI_SRC_BT = 3 };   /* where a message came from */
-enum { LSDJ_CLK_OFF, LSDJ_CLK_ALL, LSDJ_CLK_USB, LSDJ_CLK_TRS, LSDJ_CLK_BT, LSDJ_CLK_COUNT };
-enum { LSDJ_OUT_OFF, LSDJ_OUT_USB, LSDJ_OUT_BT, LSDJ_OUT_BOTH, LSDJ_OUT_COUNT };
+enum { LSDJ_MIDI_SRC_USB = 1, LSDJ_MIDI_SRC_TRS = 2 };   /* where a message came from */
+enum { LSDJ_CLK_OFF, LSDJ_CLK_ALL, LSDJ_CLK_USB, LSDJ_CLK_TRS, LSDJ_CLK_COUNT };
+enum { LSDJ_OUT_OFF, LSDJ_OUT_USB, LSDJ_OUT_COUNT };
 #define LSDJ_MIDI_DELAYS 3u
 static const uint8_t lsdj_midi_delay_ms[LSDJ_MIDI_DELAYS] = {100, 75, 50};
 #define LSDJ_MIDI_NOTE_CHOICES 18u   /* OFF, ALL, CH 1..16 */
@@ -54,7 +56,8 @@ static int lsdj_midi_unpack(uint32_t v, lsdj_midi_t *m) {
     lsdj_midi_defaults(m);
     if (v >> 24 != LSDJ_MIDI_MAGIC || (v & 0x00FC0000u)) return 0;
     lsdj_midi_t t = {(uint8_t)(v & 7u), (uint8_t)((v >> 3) & 1u), (uint8_t)((v >> 4) & 3u), (uint8_t)((v >> 6) & 31u),
-                     (uint8_t)((v >> 11) & 15u), (uint8_t)((v >> 15) & 3u), (uint8_t)((v >> 17) & 1u)};
+                     (uint8_t)((v >> 11) & 15u), (uint8_t)((v >> 15) & 1u), (uint8_t)((v >> 17) & 1u)};   /* OUT: BT 2 -> OFF, USB+BT 3 -> USB */
+    if (t.clock_src == 4u) t.clock_src = LSDJ_CLK_ALL;   /* (CLOCK IN BT) */
     if (t.clock_src >= LSDJ_CLK_COUNT || t.delay >= LSDJ_MIDI_DELAYS || t.note >= LSDJ_MIDI_NOTE_CHOICES ||
         t.cc >= LSDJ_MIDI_CC_CHOICES) return 0;
     *m = t;
@@ -68,7 +71,6 @@ static int lsdj_midi_clock_from(const lsdj_midi_t *m, unsigned src) {
     case LSDJ_CLK_ALL: return 1;
     case LSDJ_CLK_USB: return src == LSDJ_MIDI_SRC_USB;
     case LSDJ_CLK_TRS: return src == LSDJ_MIDI_SRC_TRS;
-    case LSDJ_CLK_BT: return src == LSDJ_MIDI_SRC_BT;
     default: return 0;
     }
 }
@@ -219,8 +221,8 @@ static uint32_t lsdj_midi_num(char *d, uint32_t n, unsigned v) {
     d[n] = 0; return n;
 }
 static void lsdj_midi_line(const lsdj_midi_t *m, unsigned item, char line[20]) {
-    static const char *const clk[LSDJ_CLK_COUNT] = {"OFF", "ALL", "USB", "TRS", "BT"};
-    static const char *const out[LSDJ_OUT_COUNT] = {"OFF", "USB", "BT", "USB+BT"};
+    static const char *const clk[LSDJ_CLK_COUNT] = {"OFF", "ALL", "USB", "TRS"};
+    static const char *const out[LSDJ_OUT_COUNT] = {"OFF", "USB"};
     uint32_t n = 0;
     switch (item) {
     case LSDJ_MIDI_ITEM_CLOCK: n = lsdj_midi_put(line, 0, "CLOCK IN: "); lsdj_midi_put(line, n, clk[m->clock_src % LSDJ_CLK_COUNT]); break;

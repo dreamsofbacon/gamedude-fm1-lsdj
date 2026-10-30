@@ -55,11 +55,11 @@ static const uint16_t *scaled(void) {
     return lcd_img;
 }
 static const volatile uint16_t *io_screen(uint32_t *shown) { *shown = 4242; return scaled(); }
-static uint32_t stream_bands = 0xDEAD; static int stream_ok = 1;   /* 0: as over Bluetooth */
+static uint32_t stream_bands = 0xDEAD; static int stream_ok = 1;   /* 0: a link that cannot stream */
 static uint8_t stream_round;
 static int io_stream(uint32_t bands, uint8_t round) { if (!stream_ok) return 0; stream_bands = bands; stream_round = round; return 1; }
 static const lsdj_link_io_t io = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
-                                  io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute,
+                                  io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, io_mget, io_mset, io_cart, io_mute,
                                   io_eget, io_eset, io_screen, io_stream};
 /* A SCREEN_PIXELS message -> row (or -1), px; checks the framing. Status in *status. */
 static int unpixels(const uint8_t *m, uint32_t n, uint16_t px[LSDJ_LINK_SCREEN_W], unsigned *status) {
@@ -80,7 +80,7 @@ static int unpixels(const uint8_t *m, uint32_t n, uint16_t px[LSDJ_LINK_SCREEN_W
 }
 /* firmware before FM-1_979: no feature switches */
 static const lsdj_link_io_t io_old = {io_save, io_size, io_pause, io_store, io_load, io_reset, io_fw, io_title, io_known,
-                                      io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, 0, io_mget, io_mset, io_cart, io_mute};
+                                      io_sget, io_sset, io_fget, io_fset, io_tget, io_tset, io_cstore, io_live, io_mget, io_mset, io_cart, io_mute};
 static lsdj_link_t st;
 static uint8_t reply[LSDJ_LINK_REPLY_MAX];
 static uint32_t rn;
@@ -199,7 +199,7 @@ int main(void) {
     assert(req(LSDJ_LINK_LIVE, 0, 0, 0) == LSDJ_LINK_OK);
     assert(rd(0) == 2 && rd(1) == 3 && rd16(2) == 170 && rd(4) == 5 && rd(5) == 1 && rd(6) == 0xF && rd(7) == 0 && rd(7 + 42) == 0xF2);
     assert(rd(7 + 4 * LSDJ_LINK_FX_WORDS) == 0x82 && rn == 6u + 2u * (8u + 4u * LSDJ_LINK_FX_WORDS) + 1u);   /* battery: 2 bars, USB */
-    assert(req(LSDJ_LINK_BT, 0, 0, 0) == LSDJ_LINK_BAD);   /* no Bluetooth in this build */
+    assert(req(LSDJ_LINK_OP_21, 0, 0, 0) == LSDJ_LINK_BAD);   /* Bluetooth status until FM-1_993: gone */
     { uint8_t b[4] = {0x01, 0x80, 0x02, 0x4D};
       assert(req(LSDJ_LINK_MIDI_SET, b, 4, 0) == LSDJ_LINK_OK && midi_word == 0x4D028001u);
       assert(req(LSDJ_LINK_MIDI_GET, 0, 0, 0) == LSDJ_LINK_OK && rd(0) == 0x01 && rd(3) == 0x4D);
@@ -271,7 +271,7 @@ int main(void) {
       pic[4 * LSDJ_LINK_SCREEN_W + 5] = 0xBEEF;   /* 17 colours: status 2, the row only */
       { uint32_t n = lsdj_link_screen_pixels(scaled(), 4, 99 | 128, m); assert(unpixels(m, n, px, &status) == 4 && status == 2 && n == 7u + 2u + 1u); }
       { uint32_t n = lsdj_link_screen_pixels(scaled(), 143, 99 | 128, m); assert(unpixels(m, n, px, &status) == 143); }   /* row > 127: 8 bits */
-      /* refused: a link that cannot stream (Bluetooth), wrong length, firmware before FM-1_985 */
+      /* refused: a link that cannot stream, wrong length, firmware before FM-1_985 */
       stream_ok = 0; stream_bands = 77; assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q, 0) == LSDJ_LINK_BAD && rn == 7 && stream_bands == 77); stream_ok = 1;
       assert(req(LSDJ_LINK_SCREEN_SYNC, q, sizeof q - 1, 0) == LSDJ_LINK_BAD && req(LSDJ_LINK_SCREEN_SYNC, 0, 0, 0) == LSDJ_LINK_BAD);
       lsdj_link_io_t io984 = io; io984.screen_stream = 0;

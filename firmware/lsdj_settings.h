@@ -17,14 +17,11 @@ typedef struct {
     uint8_t select_key;      /* extra Select in button mode: 0 off, 1 F#5, 2 D#5 */
     uint8_t meter;           /* CPU meter on screen */
     uint8_t theme;           /* colour theme, 0..LSDJ_SET_THEMES-1 (firmware/lsdj_theme.h) */
-    uint8_t bluetooth;       /* 0 off, 1 DEVICE (a BLE-MIDI device: firmware/lsdj_ble.h) */
     uint8_t popup;           /* how long pop-ups (effects panel, messages) stay: lsdj_set_popup_ms */
 } lsdj_settings_t;
 
 #define LSDJ_SET_MAGIC 0x5Au
 #define LSDJ_SET_THEMES LSDJ_THEMES   /* the index: bits 7-9, bit 12 (bit 3), bits 15-17 (bits 4-6) */
-#define LSDJ_SET_BT_MODES 2u
-static const char *const lsdj_set_bt_name[LSDJ_SET_BT_MODES] = {"OFF", "DEVICE"};
 #define LSDJ_SET_POPUPS 4u   /* bits 13-14 */
 static const char *const lsdj_set_popup_name[LSDJ_SET_POPUPS] = {"1.5S", "3S", "5S", "10S"};
 static const uint32_t lsdj_set_popup_ms[LSDJ_SET_POPUPS] = {1500u, 3000u, 5000u, 10000u};
@@ -34,17 +31,16 @@ static uint32_t lsdj_set_pack(const lsdj_settings_t *s) {
     return (uint32_t)LSDJ_SET_MAGIC << 24 | (uint32_t)(s->knobs_swapped & 1u) | (uint32_t)(s->presets_rev & 1u) << 1 |
            (uint32_t)(s->algo_rev & 1u) << 2 | (uint32_t)(s->play_is_select & 1u) << 3 |
            (uint32_t)(s->select_key & 3u) << 4 | (uint32_t)(s->meter & 1u) << 6 | (uint32_t)(s->theme & 7u) << 7 | (uint32_t)((s->theme >> 3) & 1u) << 12 | (uint32_t)((s->theme >> 4) & 7u) << 15 |
-           (uint32_t)(s->bluetooth & 3u) << 10 | (uint32_t)(s->popup & 3u) << 13;
+           (uint32_t)(s->popup & 3u) << 13;   /* bits 10-11: BLUETOOTH until FM-1_993 (0 now, ignored) */
 }
 /* 0 if v is not a packed settings word (the defaults are set then). */
 static int lsdj_set_unpack(uint32_t v, lsdj_settings_t *s) {
-    lsdj_settings_t d = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    lsdj_settings_t d = {0, 0, 0, 0, 0, 0, 0, 0};
     *s = d;
-    if (v >> 24 != LSDJ_SET_MAGIC || (v & 0x00FC0000u) || ((v >> 4) & 3u) > 2u || lsdj_set_theme_of(v) >= LSDJ_SET_THEMES ||
-        ((v >> 10) & 3u) >= LSDJ_SET_BT_MODES) return 0;
+    if (v >> 24 != LSDJ_SET_MAGIC || (v & 0x00FC0000u) || ((v >> 4) & 3u) > 2u || lsdj_set_theme_of(v) >= LSDJ_SET_THEMES) return 0;
     s->knobs_swapped = v & 1u; s->presets_rev = (v >> 1) & 1u; s->algo_rev = (v >> 2) & 1u;
     s->play_is_select = (v >> 3) & 1u; s->select_key = (v >> 4) & 3u; s->meter = (v >> 6) & 1u; s->theme = (uint8_t)lsdj_set_theme_of(v);
-    s->bluetooth = (v >> 10) & 3u; s->popup = (v >> 13) & 3u;
+    s->popup = (v >> 13) & 3u;
     return 1;
 }
 
@@ -56,7 +52,7 @@ static int lsdj_set_unpack(uint32_t v, lsdj_settings_t *s) {
    knob moves between the lines, KNOB 1-4 change the selected one, GLO closes
    (and keeps the changes). Drawn with lsdj_ov_list (lsdj_overlay.h). */
 enum { LSDJ_SET_KNOBS, LSDJ_SET_PRESETS_DIR, LSDJ_SET_ALGO_DIR, LSDJ_SET_PLAYREC, LSDJ_SET_SELKEY,
-       LSDJ_SET_METER, LSDJ_SET_THEME, LSDJ_SET_POPUP, LSDJ_SET_BT, LSDJ_SET_ITEMS };
+       LSDJ_SET_METER, LSDJ_SET_THEME, LSDJ_SET_POPUP, LSDJ_SET_ITEMS };
 
 typedef struct {
     uint8_t open, cursor, changed, page;   /* page: LSDJ_PAGE_* (the top, or a category) */
@@ -77,13 +73,12 @@ static unsigned lsdj_set_get(const lsdj_settings_t *s, unsigned item) {
     case LSDJ_SET_PLAYREC: return s->play_is_select;
     case LSDJ_SET_SELKEY: return s->select_key;
     case LSDJ_SET_THEME: return s->theme;
-    case LSDJ_SET_BT: return s->bluetooth;
     case LSDJ_SET_POPUP: return s->popup;
     default: return s->meter;
     }
 }
 static unsigned lsdj_set_choices(unsigned item) {
-    return item == LSDJ_SET_SELKEY ? 3u : item == LSDJ_SET_THEME ? LSDJ_SET_THEMES : item == LSDJ_SET_BT ? LSDJ_SET_BT_MODES : item == LSDJ_SET_POPUP ? LSDJ_SET_POPUPS : 2u;
+    return item == LSDJ_SET_SELKEY ? 3u : item == LSDJ_SET_THEME ? LSDJ_SET_THEMES : item == LSDJ_SET_POPUP ? LSDJ_SET_POPUPS : 2u;
 }
 /* A setting moves one choice per click, clockwise up, and stops at the ends. */
 static int lsdj_set_turn(lsdj_settings_t *s, unsigned item, int steps) {
@@ -98,7 +93,6 @@ static int lsdj_set_turn(lsdj_settings_t *s, unsigned item, int steps) {
     case LSDJ_SET_PLAYREC: s->play_is_select = to; break;
     case LSDJ_SET_SELKEY: s->select_key = to; break;
     case LSDJ_SET_THEME: s->theme = to; break;
-    case LSDJ_SET_BT: s->bluetooth = to; break;
     case LSDJ_SET_POPUP: s->popup = to; break;
     default: s->meter = to; break;
     }
@@ -117,7 +111,6 @@ static void lsdj_set_line(const lsdj_settings_t *s, unsigned item, char line[20]
     case LSDJ_SET_SELKEY: n = lsdj_set_put(line, 0, "SELECT KEY: "); lsdj_set_put(line, n, sel[s->select_key % 3u]); break;
     case LSDJ_SET_THEME: n = lsdj_set_put(line, 0, "THEME: "); lsdj_set_put(line, n, lsdj_set_theme_name[s->theme % LSDJ_SET_THEMES]); break;
     case LSDJ_SET_POPUP: n = lsdj_set_put(line, 0, "POPUP TIME: "); lsdj_set_put(line, n, lsdj_set_popup_name[s->popup % LSDJ_SET_POPUPS]); break;
-    case LSDJ_SET_BT: n = lsdj_set_put(line, 0, "BLUETOOTH: "); lsdj_set_put(line, n, lsdj_set_bt_name[s->bluetooth % LSDJ_SET_BT_MODES]); break;
     default: n = lsdj_set_put(line, 0, "CPU METER: "); lsdj_set_put(line, n, s->meter ? "ON" : "OFF"); break;
     }
 }
@@ -134,7 +127,7 @@ enum { LSDJ_PAGE_TOP, LSDJ_PAGE_CONTROLS, LSDJ_PAGE_DISPLAY, LSDJ_PAGE_MIDI, LSD
 #define LSDJ_MENU_CAT(p) (0x80u + (p))
 #define LSDJ_MENU_BACK 0xFFu
 #define LSDJ_MENU_MAX (LSDJ_FEAT_ITEMS + 1u)   /* the longest page: BACK and the feature switches */
-typedef char lsdj_menu_max_ok[LSDJ_MENU_MAX >= LSDJ_MIDI_ITEMS + 2u ? 1 : -1];   /* ... MIDI: BACK, options, BLUETOOTH */
+typedef char lsdj_menu_max_ok[LSDJ_MENU_MAX >= LSDJ_MIDI_ITEMS + 1u ? 1 : -1];   /* ... MIDI: BACK, options */
 static const char *const lsdj_page_name[LSDJ_PAGES] = {"SETTINGS", "CONTROLS", "DISPLAY", "MIDI", "FX+LIGHTS"};
 static unsigned lsdj_menu_entries(unsigned page, uint8_t e[LSDJ_MENU_MAX]) {
     static const uint8_t top[] = {LSDJ_MENU_CAT(LSDJ_PAGE_CONTROLS), LSDJ_MENU_CAT(LSDJ_PAGE_DISPLAY), LSDJ_MENU_CAT(LSDJ_PAGE_MIDI),
@@ -149,7 +142,6 @@ static unsigned lsdj_menu_entries(unsigned page, uint8_t e[LSDJ_MENU_MAX]) {
     case LSDJ_PAGE_MIDI:
         e[n++] = LSDJ_MENU_BACK;
         for (unsigned i = 0; i < LSDJ_MIDI_ITEMS; i++) e[n++] = (uint8_t)LSDJ_MENU_MIDI(i);
-        e[n++] = LSDJ_SET_BT;
         break;
     case LSDJ_PAGE_FEAT:
         e[n++] = LSDJ_MENU_BACK;

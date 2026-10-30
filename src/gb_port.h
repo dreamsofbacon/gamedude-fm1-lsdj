@@ -17,13 +17,8 @@ int gp_load(const uint8_t *rom, uint32_t size);
 void gp_set_bank_map(const uint8_t *map, uint32_t banks, const uint32_t *start, const uint16_t *len);
 int gp_frame(void);
 /* Sound samples the emulator keeps queued (44.1 kHz): 2955 = 67 ms, four frames, the
-   room slow frames and the effects need (alpha 56-59 had 1300, 29 ms: crunchy on the
-   device). The Bluetooth build (LSDJ_BLE) still has only the small one: it needs the RAM. */
-#if LSDJ_BLE
-#define GP_AUDIO_TARGET 1300u
-#else
+   room slow frames and the effects need (alpha 56-59 had 1300, 29 ms: crunchy on the device). */
 #define GP_AUDIO_TARGET 2955u
-#endif
 /* LSDj leading (SYNC = LSDJ): the sound position of each tick it sent (24 a beat), oldest first. */
 int gp_master_tick_peek(uint32_t *pos);
 void gp_master_tick_drop(void);

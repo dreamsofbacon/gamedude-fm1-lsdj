@@ -442,7 +442,7 @@ static void midi_in(uint32_t pkt,uint32_t at_ms,uint32_t src){
     case LSDJ_MIDI_PC:midi_pc_row=d1;return;
     default:return;
     }
-    uint32_t age=fm1_ms-at_ms;if(age>50u)age=50u;   /* waited in the ring (ms; Bluetooth: since it was sent) */
+    uint32_t age=fm1_ms-at_ms;if(age>50u)age=50u;   /* waited in the ring (ms) */
     tick_target=sound_clock()-age*441u/10u+lsdj_midi_delay_samples(&midi);
     sync_midi=(uint8_t)(sync_off&&gp_save_data()[sync_off]==LSDJ_SYNC_MIDI);
     int said=lsdj_ms_byte(&msync,st,sync_midi,lsdj_armed(),sync_link_send);
@@ -517,9 +517,6 @@ static void feat_apply(void){
 #include "lsdj_theme.h"
 typedef char lsdj_theme_count_ok[LSDJ_THEMES==LSDJ_SET_THEMES?1:-1];
 static void settings_apply(void){
-#if !LSDJ_BLE
-    settings.bluetooth=0;   /* (this build has no Bluetooth: BLUETOOTH stays OFF) */
-#endif
     static const uint32_t sel[3]={0,1u<<LSDJ_KEY_FS5,1u<<LSDJ_KEY_DS5};
     lsdj_input_config(&lsdj_in,settings.knobs_swapped,settings.presets_rev,settings.algo_rev,
                       settings.play_is_select,sel[settings.select_key%3u]);
@@ -893,12 +890,6 @@ static void lk_live(lsdj_link_live_t *l){
     l->battery=(uint8_t)battery_level();
     if(armed_addr)for(unsigned c=0;c<4;c++)if(gp_wram_peek((uint16_t)(armed_addr+c)))l->playing|=(uint8_t)(1u<<c);
 }
-#if LSDJ_BLE
-#include "lsdj_ble.h"
-#define LK_BT_STAT lsdj_ble_stat
-#else
-#define LK_BT_STAT 0
-#endif
 static uint32_t lk_midi_get(void){return lsdj_midi_pack(&midi);}
 static int lk_midi_set(uint32_t v){lsdj_midi_t t;if(!lsdj_midi_unpack(v,&t))return 0;midi=t;return 1;}
 static const volatile uint8_t *lk_cartridge(uint32_t *len){
@@ -926,12 +917,11 @@ static const volatile uint16_t *lk_screen(uint32_t *shown){*shown=display_count;
    the rate). A row goes only if it fits the ring whole (ota_wire_send never waits) and the ring holds
    at most SCR_QUEUE packets; while MIDI out (notes, clock) waits, rows wait for the ring to empty so
    it goes first (USB sends SysEx before MIDI): a note waits at most what is queued, ~4 ms. */
-static uint32_t scr_bands;static uint8_t scr_row,scr_round,link_ble;
+static uint32_t scr_bands;static uint8_t scr_row,scr_round;
 static uint8_t link_reply[LSDJ_LINK_REPLY_MAX];
 /* FM-1_990: with the push bit the FM-1 also sends each new picture by itself (screen_push). */
 static lsdj_link_push_t scr_push;
 static int lk_screen_stream(uint32_t bands,uint8_t round){
-    if(link_ble)return 0;
     if(bands&LSDJ_LINK_PUSH)lsdj_link_push_start(&scr_push,screen,display_count,round,fm1_ms);else scr_push.on=0;
     scr_bands=bands&~LSDJ_LINK_PUSH;scr_row=0;scr_round=round;return 1;
 }
@@ -952,7 +942,7 @@ static void screen_stream(void){
 }
 /* Pushing: a new picture on the LCD, the last one's rows all out: its SCREEN_FRAME, then its rows. */
 static void screen_push(void){
-    if(!scr_push.on||scr_bands||link_ble||scr_push.shown==display_count)return;
+    if(!scr_push.on||scr_bands||scr_push.shown==display_count)return;
     uint32_t queued=so_w-so_r,bands;uint16_t h[LSDJ_LINK_SCREEN_BANDS];
     if(queued>SCR_QUEUE||(queued&&mo_w!=mo_r)||queued+22u>SXQ)return;   /* a SCREEN_FRAME: 58 bytes */
     uint32_t n=lsdj_link_push_frame(&scr_push,screen,display_count,fm1_ms,link_reply,&bands,h);
@@ -961,87 +951,13 @@ static void screen_push(void){
     scr_round=lsdj_link_push_sent(&scr_push,display_count,bands,h);scr_bands=bands;scr_row=0;
 }
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
-    lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,
+    lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,
     lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set,lk_feat_get,lk_feat_set,lk_screen,lk_screen_stream};
 static int app_sysex_frame(const uint8_t *frame,uint32_t size){
     if(!lsdj_link_match(frame,size))return 0;
     ota_wire_send(link_reply,lsdj_link_handle(&link_state,&link_io,frame,size,fm1_ms,link_reply));
     return 1;
 }
-#if LSDJ_BLE
-/* Bluetooth MIDI (firmware/lsdj_ble.c, tools/build.py --ble). BLUETOOTH = DEVICE: the
-   FM-1 is a BLE-MIDI device. Clock and transport join USB / TRS (midi_in, timed by the
-   sender); the web page's link answers over Bluetooth as over USB.
-   This unit's radio calibration (the stock firmware's config sector, 0xE8000) is read
-   once at boot, before the emulator runs on CPU1, so the radio never reads flash later. */
-#include "../experiments/bluetooth/rf_calibration.c"   /* GameDude's validated reader */
-static np_rf_calibration rf_cal;
-static int rf_ok;
-static int rf_read(void *ctx,uint32_t off,uint8_t *p,uint32_t n){(void)ctx;fm1_wdt_feed();return ota_fread(off,p,n);}
-static void ble_rf_boot(void){rf_ok=np_rf_load_fm1(rf_read,0,&rf_cal)==NP_RF_OK;}
-int core_rf_trim(uint8_t trim[68],uint8_t xosc[2],uint8_t pa[7]){
-    if(!rf_ok)return 0;
-    for(unsigned i=0;i<68u;i++)trim[i]=rf_cal.trim[i];
-    xosc[0]=rf_cal.xosc[0];xosc[1]=rf_cal.xosc[1];
-    for(unsigned i=0;i<7u;i++)pa[i]=rf_cal.pa[i];
-    return 1;
-}
-uint32_t core_ms(void){return fm1_ms;}
-void core_wdt_feed(void){fm1_wdt_feed();}
-void core_reboot(void){fm1_reboot();}
-void core_audio_stop(void){audio_stop();}
-void core_irq_attach(uint32_t n,void(*h)(void),uint32_t prio){if(n<128u)fm1_irq_attach(n,h,prio);}
-void core_irq_mask(uint32_t n){if(n<128u)fm1_irq_mask(n);}
-void core_irq_unmask(uint32_t n){if(n<128u)FM1_ICFG(n)|=1u<<((n&7u)*4u);}
-uint32_t core_irq_is_masked(uint32_t n){return n<128u?!(FM1_ICFG(n)&(1u<<((n&7u)*4u))):1u;}
-void core_ble_midi(const uint8_t *m,uint32_t n,uint32_t sent_ms){   /* as a USB-MIDI packet */
-    if(n==1u&&m[0]>=0xF8u)midi_in(0x0Fu|(uint32_t)m[0]<<8,sent_ms,LSDJ_MIDI_SRC_BT);
-    else if(n>=2u&&m[0]>=0x80u&&m[0]<0xF0u)
-        midi_in((uint32_t)(m[0]>>4)|(uint32_t)m[0]<<8|(uint32_t)m[1]<<16|(uint32_t)(n>2u?m[2]:0u)<<24,sent_ms,LSDJ_MIDI_SRC_BT);
-}
-void core_ble_sysex(const uint8_t *m,uint32_t n){
-    if(!lsdj_link_match(m,n))return;
-    static uint8_t reply[LSDJ_LINK_REPLY_MAX];
-    link_ble=1;uint32_t k=lsdj_link_handle(&link_state,&link_io,m,n,fm1_ms,reply);link_ble=0;
-    if(k)(void)lsdj_ble_send(reply,k);
-}
-/* The address: random static, the same every start (from this unit's calibration),
-   so phones and computers find the FM-1 they paired with. */
-static void ble_mac(uint8_t mac[6]){
-    uint32_t h=2166136261u;
-    for(unsigned i=0;i<68u;i++){h^=rf_cal.trim[i];h*=16777619u;}
-    for(unsigned i=0;i<6u;i++){h^=h>>13;h*=0x5bd1e995u;mac[i]=(uint8_t)(h>>24);}
-    mac[0]|=0xC0u;mac[5]|=0xC0u;   /* (the stack keeps the most significant byte at either end) */
-}
-/* Start, and wait (up to 3 s) until the stack is up. The emulator is parked
-   meanwhile (as SAVE does): the radio starting while CPU1 runs from flash is untried. */
-static void ble_start_wait(void){
-    uint8_t mac[6];ble_mac(mac);
-    video_hold();
-    lsdj_ble_start(mac);
-    uint32_t t0=fm1_ms;
-    while(lsdj_ble_state()==LSDJ_BLE_STARTING&&fm1_ms-t0<3000u){fm1_wdt_feed();lsdj_ble_service();}
-    video_release();
-}
-static uint32_t ble_shown=LSDJ_BLE_OFF;
-static uint8_t ble_off_told;
-static uint8_t ble_skipped;   /* the last start failed (before a reset): wait for the setting to go off and on */
-static void ble_frame(void){
-    if(ble_skipped&&!settings.bluetooth)ble_skipped=0;
-    if(settings.bluetooth==1u&&!ble_skipped&&lsdj_ble_state()==LSDJ_BLE_OFF){lsdj_ov_show(&ov,"BLUETOOTH","STARTING",fm1_ms);ble_start_wait();}
-    lsdj_ble_service();
-    uint32_t s=lsdj_ble_state();
-    if(!settings.bluetooth&&s!=LSDJ_BLE_OFF&&!ble_off_told){ble_off_told=1;lsdj_ov_show(&ov,"BLUETOOTH OFF","AFTER A RESTART",fm1_ms);}
-    if(settings.bluetooth)ble_off_told=0;
-    if(s==ble_shown)return;
-    static const char *const why[]={"","NO RADIO TRIM","START TIMED OUT","NO TASK","ADDRESS REFUSED","ADVERTISING REFUSED","LINK REFUSED"};
-    uint32_t e=lsdj_ble_error();
-    if(s==LSDJ_BLE_CONNECTED)lsdj_ov_show(&ov,"BLUETOOTH","CONNECTED",fm1_ms);
-    else if(s==LSDJ_BLE_ADVERTISING)lsdj_ov_show(&ov,"BLUETOOTH",ble_shown==LSDJ_BLE_CONNECTED?"DISCONNECTED":"LSDJ BURRITO READY",fm1_ms);
-    else if(s==LSDJ_BLE_FAILED)lsdj_ov_show(&ov,"BLUETOOTH FAILED",e<sizeof why/sizeof why[0]?why[e]:"",fm1_ms);
-    if(s!=LSDJ_BLE_READY)ble_shown=s;   /* (READY: on the way to advertising) */
-}
-#endif
 /* After KNOB 1-4 turned (steps = clicks per knob): MUTE POPUP when a turned effect plays
    on muted channels only; CC OUT sends each turned effect's CC (lsdj_midi.h numbers), per
    channel on the CC FX channels (PU1's: CC FX, or 1 when it is off). */
@@ -1179,10 +1095,7 @@ static void boot_splash(int display_ok){
    before the first, Stop when they stop (lsdj_midi.h). */
 static lsdj_mco_t mco;
 static void midi_out_byte(uint8_t b){
-    if(midi.clock_out==LSDJ_OUT_USB||midi.clock_out==LSDJ_OUT_BOTH){uint32_t f=irq_save();midi_out_event(0x0Fu|(uint32_t)b<<8);irq_restore(f);}
-#if LSDJ_BLE
-    if(midi.clock_out==LSDJ_OUT_BT||midi.clock_out==LSDJ_OUT_BOTH)(void)lsdj_ble_send(&b,1);
-#endif
+    if(midi.clock_out==LSDJ_OUT_USB){uint32_t f=irq_save();midi_out_event(0x0Fu|(uint32_t)b<<8);irq_restore(f);}
 }
 static void midi_clock_out(void){
     uint32_t pos,now=sound_clock();
@@ -1262,9 +1175,6 @@ void gb_cstart(const uint32_t *parameters){
     lsdj_set_unpack(ftl.has_settings?ftl.settings:0u,&settings);settings_apply();
     lsdj_midi_unpack(((ftl.rec_has>>MIDI_REC)&1u)?ftl.rec[MIDI_REC]:0u,&midi);   /* (defaults if none) */
     lsdj_feat_unpack(((ftl.rec_has>>FEAT_REC)&1u)?ftl.rec[FEAT_REC]:0u,&feat);
-#if LSDJ_BLE
-    ble_rf_boot();   /* this unit's radio calibration, while nothing else reads flash */
-#endif
     lsdj_fx_init(&fx,fx_echo);lsdj_fx_ui_init(&fxu);fx_load();feat_apply();gp_set_fx(fx_hook);cursor_detect();
     fm1_led_key(SAVE_BUTTON,1);
 #endif
@@ -1273,12 +1183,6 @@ void gb_cstart(const uint32_t *parameters){
     for(unsigned i=0;i<4;i++)gp_frame();
     splash_active=0;
     recovery_init();
-#if LSDJ_BLE
-    if(settings.bluetooth==1u){   /* before the emulator moves to CPU1: no parking */
-        if(lsdj_ble_prev_ok())ble_start_wait();
-        else{ble_skipped=1;lsdj_ov_show(&ov,"BLUETOOTH SKIPPED","LAST START FAILED",fm1_ms);}
-    }
-#endif
 #if !GB_SMK37
     core1_emu=1;   /* the emulator moves to CPU1; if CPU1 does not start, CPU0 keeps it */
 #endif
@@ -1299,9 +1203,6 @@ void gb_cstart(const uint32_t *parameters){
         recovery_service();
         screen_push();screen_stream();
         lsdj_link_poll(&link_state,&link_io,fm1_ms);   /* an import whose page went away */
-#if LSDJ_BLE
-        ble_frame();
-#endif
 #if !GB_SMK37
         midi_clock_out();
 #endif

@@ -9,7 +9,7 @@ from fontTools.pens.boundsPen import BoundsPen
 from PIL import Image, ImageDraw, ImageFont
 ROOT=Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--font',default='C:/Windows/Fonts/seguibli.ttf');a=p.parse_args()
-color=(ROOT/'web/gamedude-color-logo.svg').exists()
+color=False   # (the website's colour logo went with web/)
 font=TTFont(a.font);glyphs=font.getGlyphSet();cmap=font.getBestCmap();units=font['head'].unitsPerEm
 ink='#eee9f7';rainbow=['#ff798b','#b48dff','#bdf69c','#ffe25a','#29e6ff']
 letters='GAMEDUDE'+(' COLOR' if color else '')
@@ -33,8 +33,6 @@ def svg(dark=False):
         ET.SubElement(root,'path',d=pen.getCommands(),fill=fill,transform=f'matrix({scale:.8f} 0 0 {-scale:.8f} {4+(x-left)*scale:.6f} {4+top*scale:.6f})')
     return ET.tostring(root,encoding='unicode')+'\n'
 name='gamedude-color-logo' if color else 'gamedude-logo'
-(ROOT/'web'/f'{name}.svg').write_text(svg(),encoding='utf-8')
-(ROOT/'web'/f'{name}-dark.svg').write_text(svg(True),encoding='utf-8')
 # Render the same positioned glyphs, then pack two indexed pixels per byte.
 w=224;h=round(w*height/width);super_scale=4
 image=Image.new('L',(w,h))

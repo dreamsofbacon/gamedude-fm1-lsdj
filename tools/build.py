@@ -1,4 +1,4 @@
-"""Build browser, native host tests and FM-1/SMK37 compile-only GB candidates."""
+"""Build native host tests and FM-1/SMK37 compile-only GB candidates."""
 import argparse, hashlib, json, os, re, subprocess, sys, zipfile
 from pathlib import Path
 from diagnostic import make_rom
@@ -6,8 +6,9 @@ from prepare_apu import prepare
 ROOT=Path(__file__).resolve().parents[1]
 # The package identity (Felucca updater, The Firmware Hub): FM-1_ + our prefix 537 + a 4-digit version
 # (FM-1_992 on: FM-1_9NN overlaps other firmwares). LSDJ_VERSION is the short name the web page's link
-# (8 bytes in INFO) and the splash use.
-LSDJ_VERSION='FM-1_992'
+# (8 bytes in INFO) and the splash use. FM-1_993 went to a private Bluetooth build (since removed), so
+# FM-1_994 is the next public one.
+LSDJ_VERSION='FM-1_994'
 LSDJ_SLOT_PRODUCT='FM-1_537'+LSDJ_VERSION[5:].zfill(4)
 DEFAULT_ZIG=ROOT.parent/'Felucca/Felucca-website/build/wasm-tools/ziglang/zig.exe'
 # JieLi toolchain: $JIELI_TOOLCHAIN, else ~/.jieli/toolchain (Dinghy's get_toolchain.sh), else the upstream path.
@@ -27,34 +28,23 @@ def rom_bytes(path):
     return p.read_bytes()
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('target',choices=['web','test','fm1','smk37'])
+    p.add_argument('target',choices=['test','fm1','smk37'])
     p.add_argument('--zig',default=os.environ.get('ZIG',str(DEFAULT_ZIG)))
     p.add_argument('--toolchain',default=os.environ.get('JIELI_TOOLCHAIN',DEFAULT_TC))
     p.add_argument('--rom',type=Path)
     p.add_argument('--rom-capacity',type=int,default=0,help='Reserve cartridge bytes for the browser ROM packer')
     p.add_argument('--lsdj-slot',type=int,default=0,help='FM-1: empty browser-patchable LSDj slot (bytes, a multiple of 256, at least 256 + 16384)')
     p.add_argument('--kits',type=int,default=None,help='Sparse cartridge (automatic above 512 KiB): LSDj kit banks to keep (default 3)')
-    p.add_argument('--ble',action='store_true',help='FM-1: Bluetooth MIDI (firmware/lsdj_ble.c, the JieLi BT libraries)')
-    p.add_argument('--ble-sdk',default=os.environ.get('AC79_BT_SDK','/root/ac79-sdk-bt'),help='AC79 SDK with the pinned BT libraries (vendor/hortator-ble/tools/ble_libs.py)')
     a=p.parse_args()
-    if a.lsdj_slot and (a.target!='fm1' or a.rom or a.kits is not None or a.rom_capacity or a.ble or
+    if a.lsdj_slot and (a.target!='fm1' or a.rom or a.kits is not None or a.rom_capacity or
                        a.lsdj_slot<16640 or a.lsdj_slot>0x8dfbc or a.lsdj_slot%256):
-        p.error('--lsdj-slot requires FM-1, a multiple of 256 bytes (at least 16640), and no ROM, kits, capacity or BLE option')
-    (ROOT/'build').mkdir(exist_ok=True);(ROOT/'web').mkdir(exist_ok=True)
+        p.error('--lsdj-slot requires FM-1, a multiple of 256 bytes (at least 16640), and no ROM, kits or capacity option')
+    (ROOT/'build').mkdir(exist_ok=True)
     prepare(ROOT)
     includes=['-Isrc','-Ivendor/peanut-gb']
     flags=['-std=c99','-O2','-fno-builtin','-DMINIGB_APU_AUDIO_FORMAT_S16SYS','-DAUDIO_SAMPLE_RATE=44100',*includes]
     sources=['src/gb_port.c','build/minigb_apu.c']
-    if a.target=='web':
-        exports=['gp_upload','gp_load_upload','gp_frame','gp_buttons','gp_pause','gp_reset','gp_palette','gp_volume',
-                 'gp_pixels','gp_save_data','gp_save_size','gp_save_dirty','gp_save_clean','gp_audio_queued',
-                 'gp_render_audio','gp_error','gp_frame_count','gp_title']
-        run([a.zig,'cc','-target','wasm32-freestanding',*flags,'-Isrc/freestanding','-nostdlib',
-             '-Wl,--no-entry','-Wl,-z,stack-size=0x10000','-Wl,--initial-memory=0x1000000','-Wl,--max-memory=0x1000000',
-             *['-Wl,--export='+x for x in exports],*sources,'src/wasm.c','src/libc.c','-o','web/gb.wasm'])
-        (ROOT/'web/diagnostic.gb').write_bytes(make_rom())
-        binary=ROOT/'web/gb.wasm'
-    elif a.target=='test':
+    if a.target=='test':
         (ROOT/'build/diagnostic.gb').write_bytes(make_rom())
         run([a.zig,'cc',*flags,'-UNDEBUG','-Wall','-Wextra',*sources,'tests/runtime.c','-o','build/runtime-test.exe'])
         run([ROOT/'build/runtime-test.exe',ROOT/'build/diagnostic.gb'])
@@ -71,9 +61,6 @@ def main():
         return
     else:
         native(a,sources)
-        return
-    (ROOT/'web/build.json').write_text(json.dumps({'sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'bytes':binary.stat().st_size})+'\n')
-    print('Built',binary,binary.stat().st_size,'bytes')
 
 def sparse_pack(rom,kits):
     """Store only the banks a large ROM needs: drop empty banks and keep the first `kits`
@@ -93,37 +80,6 @@ def sparse_pack(rom,kits):
     total=(sum(logical)-logical[0x14e]-logical[0x14f])&0xffff
     bank0=bytearray(stored[0]);bank0[0x14e:0x150]=total.to_bytes(2,'big');stored[0]=bytes(bank0)
     return b''.join(stored),bank_map,kept
-
-def ble_build(a,flags,rel,tc):
-    """The Bluetooth unit and the JieLi pieces: firmware/lsdj_ble.c (with Hortator's BT runtime), the context switch,
-    the SDK's BT config sources and log stubs as bitcode, the pinned libraries and archive members."""
-    import importlib.util,shutil
-    spec=importlib.util.spec_from_file_location('ble_libs',ROOT/'vendor/hortator-ble/tools/ble_libs.py')
-    ble_libs=importlib.util.module_from_spec(spec);spec.loader.exec_module(ble_libs)
-    ble_libs.SDK=Path(a.ble_sdk)
-    libs=ble_libs.libs()   # stops, naming it, on a missing SDK or a library that is not the pinned one
-    out=ROOT/rel/'ble';out.mkdir(exist_ok=True)
-    orel=f'{rel}/ble'
-    objs=[]
-    hdr=['-Ivendor/hortator-ble','-Ivendor/hortator-ble/ble','-Ivendor/hortator-ble/hal','-Ifirmware']
-    tc('pi32v2/bin/clang',*flags,'-mllvm','-pi32v2-large-program=true',*hdr,'-c','firmware/lsdj_ble.c','-o',f'{orel}/lsdj_ble.o')
-    objs.append(f'{orel}/lsdj_ble.o')
-    tc('pi32v2/bin/clang','-target','pi32v2','-c','vendor/hortator-ble/hal/fm1_ctx.S','-o',f'{orel}/fm1_ctx.o')
-    objs.append(f'{orel}/fm1_ctx.o')
-    sdk=str(ble_libs.SDK)
-    cfl=[('-I'+sdk+s[len('-I/sdk'):] if s.startswith('-I/sdk/') else '-Ivendor/hortator-ble/ble/sdkcfg' if s=='-Ifirmware/src/ble/sdkcfg' else s)
-         for s in ble_libs.SDK_CFLAGS]
-    for src in ble_libs.SDK_CONFIG_SOURCES:
-        o=f'{orel}/{Path(src).stem}.o'
-        tc('pi32v2/bin/clang','-target','pi32v2',*cfl,'-c',f'{sdk}/{src}','-o',o);objs.append(o)
-    tc('pi32v2/bin/clang','-target','pi32v2','-mcpu=r3','-Os','-flto','-Wall','-c','vendor/hortator-ble/ble/ble_lto_stubs.c','-o',f'{orel}/ble_lto_stubs.o')
-    objs.append(f'{orel}/ble_lto_stubs.o')
-    paths=[]
-    for p in libs:
-        shutil.copy(p,out/Path(p).name);paths.append(f'{orel}/{Path(p).name}')
-    for m in ble_libs.members(out):
-        objs.append(f'{orel}/{Path(m).name}')
-    return objs,paths,ble_libs
 
 def native(a,sources):
     out=ROOT/'build'/a.target;out.mkdir(exist_ok=True)
@@ -145,7 +101,7 @@ def native(a,sources):
     (out/'cartridge.h').write_text('/* Local cartridge; never publish game ROMs. */\n'+sparse+'static const unsigned char cartridge[] = {\n'+
         ',\n'.join(','.join(str(b) for b in storage[i:i+32]) for i in range(0,len(storage),32))+'\n};\n')
     if a.target=='smk37':
-        from build_smk_loader import build as build_loade
+        from build_smk_loader import build as build_loader
         gen,loader=build_loader(a.toolchain,out)
     rel=out.relative_to(ROOT).as_posix()
     def tc(tool,*args):
@@ -155,9 +111,6 @@ def native(a,sources):
         '-Isrc','-Isrc/freestanding','-Ivendor/peanut-gb','-Ivendor/felucca/firmware/hal','-I'+rel,
         '-DGB_SMK37='+str(int(a.target=='smk37')),'-Wall','-Wno-unused-function']
     if a.target=='smk37':flags+=['-I'+str(gen.relative_to(ROOT)).replace('\\','/')]
-    ble=getattr(a,'ble',False)
-    if ble and a.target!='fm1':raise SystemExit('--ble is for the FM-1')
-    if ble:flags+=['-DLSDJ_BLE=1']
     inputs=[*sources,'src/libc.c','firmware/board.c','firmware/start.S','vendor/felucca/firmware/hal/fm1_vec.S']
     objects=[]
     for i,src in enumerate(inputs):
@@ -165,21 +118,7 @@ def native(a,sources):
         source_flags=[('-O2' if f=='-Os' else f) for f in flags] if src in sources else flags
         tc('pi32v2/bin/clang',*source_flags,'-c',src,'-o',obj);objects.append(obj)
     elf=f'{rel}/gb-{a.target}.elf'
-    if not ble:
-        tc('pi32v2/bin/ld','--gc-sections','-T','vendor/felucca/firmware/app.ld',*objects,'-o',elf)
-    else:
-        ble_objects,ble_libs_paths,ble_libs=ble_build(a,flags,rel,tc)
-        # the BT libraries are LLVM bitcode: linked through LTO with the SDK demo's codegen options (Hortator's
-        # tools/build.py). Hortator sends the libraries' memcpy to a RAM copy (--wrap) for the radio trim, which
-        # this build never runs (the stored calibration only): ours stays, so LSDj's own calls keep theirs
-        gold=f'{a.toolchain}/pi32v2/bin/LLVMgold.so'
-        tc('pi32v2/bin/ld','--gc-sections','--plugin',gold,'--plugin-opt=mcpu=r3','--plugin-opt=-pi32v2-large-program=true',
-           '--plugin-opt=-pi32v2-always-use-itblock=false','--plugin-opt=-dont-used-symbol-list='+','.join(ble_libs.LOG_FUNCS),
-           '--orphan-handling=error','-Map',f'{rel}/gb-{a.target}.map','-T','firmware/app_ble.ld',
-           *objects,*ble_objects,'--start-group',*ble_libs_paths,'--end-group','-o',elf)
-        ok={'.volatile_ram_code','.bt_updata_ram_code'}
-        ram_code=sorted(set(re.findall(r'^\s*(\.\S*ram_code\S*)',(ROOT/rel/f'gb-{a.target}.map').read_text(),re.M))-ok)
-        if ram_code:raise SystemExit(f'BT library RAM code sections linked into XIP: {ram_code}')
+    tc('pi32v2/bin/ld','--gc-sections','-T','vendor/felucca/firmware/app.ld',*objects,'-o',elf)
     def capture(tool,*args):
         return subprocess.check_output(['wsl','-e',f'{a.toolchain}/{tool}',*args],cwd=ROOT,text=True)
     symbols=capture('common/bin/objdump','-t',elf);sections=capture('common/bin/objdump','-h',elf)
@@ -195,7 +134,7 @@ def native(a,sources):
         image.extend(b'\xff'*(offset-len(image)));image.extend(blob)
     image.extend(b'\xff'*(-len(image)%4))
     assert sym('_start')==0x2000120 and image[:4]==bytes.fromhex('04818000')
-    assert len(image)<=0x8dfbc and sym('_bss_end')<=(sym('_pool_start') if ble else 0x1c1a000) and sym('_pool_end')<=0x1c74000
+    assert len(image)<=0x8dfbc and sym('_bss_end')<=0x1c1a000 and sym('_pool_end')<=0x1c74000
     assert sym('_cpu1_stacks_hi')<=0x1c74000 and sym('_cpu1_stacks_hi')-sym('_cpu1_stacks_lo')==8192
     assert 0x1c00000<=sym('gb_core1_main')<sym('_dsp_end')<=0x1c06000
     if a.target=='smk37':
@@ -216,8 +155,6 @@ def native(a,sources):
     if a.lsdj_slot:
         result.update(lsdj_slot=1,product=LSDJ_SLOT_PRODUCT,version=LSDJ_VERSION,cartridge='empty LSDj slot',
                       compatibility='experimental generic; verified cursor profile only, other memory helpers disabled')
-    if ble:result.update(bluetooth='BLE-MIDI device (firmware/lsdj_ble.c)',ram_text_bytes=sym('_dsp_end')-0x1c00000,
-        sram_free=0x1c74000-sym('_cpu1_stacks_hi'))
     if a.target=='smk37':result.update(usb_protocol='smk37-ram-v2',product=loader['product'],loader=loader)
     (out/'manifest.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 if __name__=='__main__':main()

@@ -87,13 +87,9 @@ GP_RAM static void audio_write(uint16_t addr, uint8_t v) {
 static struct gb_s gb;
 static uint8_t save[GB_PORT_SAVE_MAX] POOL;
 static uint16_t pixels[160*144] POOL;
-/* The ring: GP_AUDIO_TARGET queued plus a frame (740) must fit. 4096 samples (93 ms);
-   the Bluetooth build's 2048 (46 ms) was crunchy on the device and stays only there. */
-#if LSDJ_BLE
-#define RING 2048u
-#else
+/* The ring: GP_AUDIO_TARGET queued plus a frame (740) must fit. 4096 samples (93 ms;
+   alpha 56-59's 2048 was crunchy on the device). */
 #define RING 4096u
-#endif
 typedef char gp_ring_fits_target[GP_AUDIO_TARGET + 740u <= RING ? 1 : -1];
 /* GP_SPLIT (FM-1 firmware): the ring holds, per sample, the four channels and the
    panning word (see minigb_apu_split); gp_audio_read mixes them on the consumer

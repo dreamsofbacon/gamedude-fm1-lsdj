@@ -35,10 +35,7 @@
    op 0x18 MIDI_SET u32   (kept with op 0x16 STORE)
    op 0x19 FEAT_GET       -> u32 (firmware/lsdj_feat.h packed; FM-1_979+, status 1 before)
    op 0x1A FEAT_SET u32   (kept with op 0x16 STORE)
-   op 0x21 BLUETOOTH      -> 13 x u32 (firmware/lsdj_ble.h lsdj_ble_stat: state, error,
-                             packets in / out, SysEx in, bad packets, MTU payload, heap
-                             high-water, heap refusals, longest task run, start stage,
-                             fatal, dropped out); status 1 in a build without Bluetooth
+   op 0x21 (Bluetooth status until FM-1_993; FM-1_994 has no Bluetooth: status 1)
    op 0x22 CART_INFO      -> u32 slot length, u32 header CRC, u32 data CRC;
                              status 1 if this build cannot export a validated slot
    op 0x23 CART_READ u32 off -> u32 off, up to 120 slot bytes (last chunk shorter);
@@ -56,7 +53,7 @@
                              2i+1 high (colour indices); more than 16: status 2
    op 0x27 SCREEN_SYNC u32 force (bit per band), 18 x u16 hashes the page holds, u8 round
                           -> u32 pictures shown, 18 x u16 hashes, u32 bands that follow
-                             (FM-1_985+, USB only: status 1 over Bluetooth and before).
+                             (FM-1_985+; status 1 before).
                              The bands whose hash differs (or forced) then come by
                              themselves, top to bottom, one SCREEN_PIXELS message per row,
                              between the main loop's other work; a new SYNC replaces the
@@ -94,13 +91,12 @@ enum { LSDJ_LINK_INFO = 0x01, LSDJ_LINK_READ, LSDJ_LINK_BEGIN, LSDJ_LINK_CHUNK_O
        LSDJ_LINK_SETTINGS_GET = 0x10, LSDJ_LINK_SETTINGS_SET, LSDJ_LINK_FX_GET, LSDJ_LINK_FX_SET,
        LSDJ_LINK_THEME_GET, LSDJ_LINK_THEME_SET, LSDJ_LINK_STORE, LSDJ_LINK_MIDI_GET, LSDJ_LINK_MIDI_SET,
        LSDJ_LINK_FEAT_GET, LSDJ_LINK_FEAT_SET,
-       LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_BT, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ, LSDJ_LINK_MUTE_SET,
+       LSDJ_LINK_LIVE = 0x20, LSDJ_LINK_OP_21, LSDJ_LINK_CART_INFO, LSDJ_LINK_CART_READ, LSDJ_LINK_MUTE_SET,
        LSDJ_LINK_SCREEN_INFO, LSDJ_LINK_SCREEN_ROW, LSDJ_LINK_SCREEN_SYNC, LSDJ_LINK_SCREEN_PIXELS,
        LSDJ_LINK_SCREEN_FRAME };
 #define LSDJ_LINK_SCREEN_W     160u
 #define LSDJ_LINK_SCREEN_H     144u
 #define LSDJ_LINK_SCREEN_BANDS 18u   /* LSDj's character rows */
-#define LSDJ_LINK_BT_STATS 13u
 #define LSDJ_LINK_PUSH     0x80000000u   /* SCREEN_SYNC force bit 31 (FM-1_990) */
 #define LSDJ_LINK_PUSH_MS  3000u
 enum { LSDJ_LINK_OK = 0, LSDJ_LINK_BAD = 1, LSDJ_LINK_STATE = 2, LSDJ_LINK_CRC = 3, LSDJ_LINK_FLASH = 4 };
@@ -131,7 +127,6 @@ typedef struct {
     void (*theme_set)(const uint16_t c[8]);
     int (*store_config)(void);                   /* 0 = ok */
     void (*live)(lsdj_link_live_t *l);
-    uint32_t (*bt_stat)(unsigned i);             /* 0 in a build without Bluetooth */
     uint32_t (*midi_get)(void);                  /* the MIDI options; 0 = none (status 1) */
     int (*midi_set)(uint32_t v);
     const volatile uint8_t *(*cartridge)(uint32_t *len); /* validated immutable slot, or NULL */
@@ -461,10 +456,6 @@ static uint32_t lsdj_link_handle(lsdj_link_t *s, const lsdj_link_io_t *io, const
         n = lsdj_link_put32(r, n, send);
         break;
     }
-    case LSDJ_LINK_BT:
-        if (an || !io->bt_stat) { status = LSDJ_LINK_BAD; break; }
-        for (unsigned i = 0; i < LSDJ_LINK_BT_STATS; i++) n = lsdj_link_put32(r, n, io->bt_stat(i));
-        break;
     default:
         status = LSDJ_LINK_BAD;
     }

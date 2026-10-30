@@ -49,15 +49,14 @@ int main(int argc, char **argv) {
     /* Defaults = today's behaviour; packing round-trips every combination. */
     assert(!lsdj_set_unpack(0xFFFFFFFFu, &s) && !s.knobs_swapped && !s.presets_rev && !s.meter && !s.select_key);
     assert(!lsdj_set_unpack(0, &s));
-    for (unsigned v = 0; v < 192u * 8u * LSDJ_SET_BT_MODES; v++) {
+    for (unsigned v = 0; v < 192u * 8u; v++) {
         lsdj_settings_t a = {v & 1u, (v >> 1) & 1u, (v >> 2) & 1u, (v >> 3) & 1u, (uint8_t)((v >> 4) % 3u), (v >> 6) & 1u,
-                             (uint8_t)((v / 192u) % 8u), (uint8_t)(v / (192u * 8u))};
+                             (uint8_t)((v / 192u) % 8u)};
         assert(lsdj_set_unpack(lsdj_set_pack(&a), &t) == 1 && !memcmp(&a, &t, sizeof a));
         check_text(&a);
     }
     assert(!lsdj_set_unpack(0x5A000030u, &s));   /* select key 3: invalid */
-    assert(!lsdj_set_unpack(0x5A000000u | (uint32_t)LSDJ_SET_BT_MODES << 10, &s));   /* no such Bluetooth mode */
-    assert(lsdj_set_unpack(0x5A000400u, &s) && s.bluetooth == 1);                     /* DEVICE */
+    assert(lsdj_set_unpack(0x5A000400u, &s) && !(lsdj_set_pack(&s) & 0xC00u));   /* BLUETOOTH (until FM-1_993): ignored, not kept */
 
     /* The categories: the top lists CONTROLS, DISPLAY, MIDI; a knob turn opens
        the selected one on its first setting; BACK (its first line) returns to
@@ -101,11 +100,7 @@ int main(int argc, char **argv) {
     assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 0 && m.page == LSDJ_PAGE_MIDI && m.cursor == 1 && !m.changed);
     still(&m);
     {   char l[LSDJ_MENU_LINES][20]; lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[0], "SETTINGS/MIDI") && !strcmp(l[1], "BACK")); }
-    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_SET_BT);   /* the last line: BLUETOOTH */
-    { int32_t s2[4] = {5, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 1 && s.bluetooth == LSDJ_SET_BT_MODES - 1u); }
-    { char l[20]; lsdj_set_line(&s, LSDJ_SET_BT, l); assert(!strcmp(l, "BLUETOOTH: DEVICE")); }
-    { int32_t s2[4] = {-5, 0, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) && s.bluetooth == 0); }
-    lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); assert(lsdj_menu_entry(&m) == LSDJ_MENU_MIDI(LSDJ_MIDI_ITEMS - 1u));   /* PC CUE */
+    lsdj_menu_knobs(&m, &s, &mi, &fe, no, 99); assert(lsdj_menu_entry(&m) == LSDJ_MENU_MIDI(LSDJ_MIDI_ITEMS - 1u));   /* the last line: PC CUE */
     assert(lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0) == 2 && mi.pc_cue == 1);
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, -99); assert(m.cursor == 0 && lsdj_menu_entry(&m) == LSDJ_MENU_BACK);
     {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l); assert(!strcmp(l[cnt - 1], "K1=BACK  GLO=CLOSE")); }

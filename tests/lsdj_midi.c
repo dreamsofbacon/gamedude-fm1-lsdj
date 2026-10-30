@@ -31,12 +31,12 @@ int main(void) {
     /* routing */
     lsdj_midi_defaults(&m);
     assert(lsdj_midi_route(&m, pk(0xF8, 0, 0), LSDJ_MIDI_SRC_TRS) == LSDJ_MIDI_CLOCK);
-    assert(lsdj_midi_route(&m, pk(0xFA, 0, 0), LSDJ_MIDI_SRC_BT) == LSDJ_MIDI_TRANSPORT);
+    assert(lsdj_midi_route(&m, pk(0xFA, 0, 0), LSDJ_MIDI_SRC_USB) == LSDJ_MIDI_TRANSPORT);
     assert(lsdj_midi_route(&m, pk(0x90, 60, 100), LSDJ_MIDI_SRC_USB) == LSDJ_MIDI_IGNORE);   /* notes off by default */
     m.clock_src = LSDJ_CLK_USB;
     assert(lsdj_midi_route(&m, pk(0xF8, 0, 0), LSDJ_MIDI_SRC_USB) == LSDJ_MIDI_CLOCK);
     assert(lsdj_midi_route(&m, pk(0xF8, 0, 0), LSDJ_MIDI_SRC_TRS) == LSDJ_MIDI_IGNORE);
-    assert(lsdj_midi_route(&m, pk(0xFC, 0, 0), LSDJ_MIDI_SRC_BT) == LSDJ_MIDI_IGNORE);
+    assert(lsdj_midi_route(&m, pk(0xFC, 0, 0), LSDJ_MIDI_SRC_TRS) == LSDJ_MIDI_IGNORE);
     m.transport = 0;
     assert(lsdj_midi_route(&m, pk(0xFA, 0, 0), LSDJ_MIDI_SRC_USB) == LSDJ_MIDI_IGNORE);   /* hand transport */
     assert(lsdj_midi_route(&m, pk(0xF8, 0, 0), LSDJ_MIDI_SRC_USB) == LSDJ_MIDI_CLOCK);     /* the clock still */
@@ -97,7 +97,11 @@ int main(void) {
     { char l[20]; lsdj_midi_line(&m, LSDJ_MIDI_ITEM_NOTE, l); assert(!strcmp(l, "NOTE IN: CH 10"));
       lsdj_midi_line(&m, LSDJ_MIDI_ITEM_DELAY, l); assert(!strcmp(l, "SYNC DELAY: 50 MS"));
       m.cc = 13; lsdj_midi_line(&m, LSDJ_MIDI_ITEM_CC, l); assert(!strcmp(l, "CC FX: CH 13-16"));
-      m.clock_out = LSDJ_OUT_BOTH; lsdj_midi_line(&m, LSDJ_MIDI_ITEM_OUT, l); assert(!strcmp(l, "CLOCK OUT: USB+BT")); }
+      m.clock_out = LSDJ_OUT_USB; lsdj_midi_line(&m, LSDJ_MIDI_ITEM_OUT, l); assert(!strcmp(l, "CLOCK OUT: USB")); }
+    /* FM-1_994: words saved with Bluetooth choices (CLOCK IN BT = 4, CLOCK OUT BT = 2, USB+BT = 3) */
+    assert(lsdj_midi_unpack(0x4D000000u | 4u | 1u << 3, &t) && t.clock_src == LSDJ_CLK_ALL && t.transport);
+    assert(lsdj_midi_unpack(0x4D000001u | 2u << 15, &t) && t.clock_out == LSDJ_OUT_OFF);
+    assert(lsdj_midi_unpack(0x4D000001u | 3u << 15, &t) && t.clock_out == LSDJ_OUT_USB);
     printf("PASS lsdj_midi: packing (%u combinations), routing by source / channel, CC -> effects, clock out, list lines\n", combos);
     return 0;
 }

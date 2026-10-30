@@ -1,4 +1,0 @@
-Hortator 2d7a0b19f5c3fd5d23bec6d4e91f6038d46d1a70
-Copied unchanged from that revision, except:
-- ble/ble_port.c: with BLE_RF_FROM_CORE, the radio calibration (trim, crystal, PA) comes from the board's
-  boot-time read (core_rf_trim) instead of a flash scan at start, and the crystal / PA values are this unit's.

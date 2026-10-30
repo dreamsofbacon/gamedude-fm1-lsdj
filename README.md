@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_987). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_988). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,17 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: screen mirror rows back to back (FM-1_988)
+
+- **The web page's screen mirror keeps up with the FM-1's own screen.** 985-987 sent one
+  SCREEN_PIXELS row per main-loop pass, and only once the SysEx ring was empty, so the length of
+  a pass (scaling a picture, drawing panels) set the rate: Colin saw 1-9 pictures a second on
+  the page while playing. screen_stream now sends up to 12 rows a pass, each only if it fits the
+  ring whole (ota_wire_send never waits), keeping at most 24 packets queued; while MIDI out
+  waits it lets the ring empty first, so notes and clock still go out within ~4 ms.
+- The page shows each finished round at once (987 held changing rounds up to 50 ms) and shows
+  the FM-1's own pictures a second (SCREEN_SYNC's count) next to its own.
 
 ## LSDj Burrito: screen mirror without torn panels, 30 a second (FM-1_987)
 
@@ -185,9 +196,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_987 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_988 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_987 for alpha 87).
+Normal ROM builds use the current alpha identity (FM-1_988 for alpha 88).
 
 From this repository in WSL:
 

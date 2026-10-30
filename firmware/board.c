@@ -920,18 +920,28 @@ static int lk_feat_set(uint32_t v){lsdj_feat_t t;if(!lsdj_feat_unpack(v,&t))retu
    panels are scaled out (the page then saw torn or missing panels). The main loop writes
    `screen` only right before display_frame, and SCREEN_SYNC / screen_stream run in it too. */
 static const volatile uint16_t *lk_screen(uint32_t *shown){*shown=display_count;return screen;}
-/* SCREEN_SYNC (USB only): the bands asked for go a row at a time from the main loop, each
-   only once the SysEx queue is empty (notes wait at most one row, ~1 ms). */
+/* SCREEN_SYNC (USB only): the bands asked for go from the main loop, several rows a pass
+   (FM-1_988; 985-987 sent one row a pass, after the SysEx ring had emptied, so a pass's length set
+   the rate). A row goes only if it fits the ring whole (ota_wire_send never waits) and the ring holds
+   at most SCR_QUEUE packets; while MIDI out (notes, clock) waits, rows wait for the ring to empty so
+   it goes first (USB sends SysEx before MIDI): a note waits at most what is queued, ~4 ms. */
 static uint32_t scr_bands;static uint8_t scr_row,scr_round,link_ble;
 static uint8_t link_reply[LSDJ_LINK_REPLY_MAX];
 static int lk_screen_stream(uint32_t bands,uint8_t round){if(link_ble)return 0;scr_bands=bands;scr_row=0;scr_round=round;return 1;}
+#define SCR_QUEUE 24u   /* packets: two USB transfers' worth */
 static void screen_stream(void){
-    if(!scr_bands||so_w!=so_r)return;
-    while(scr_row<LSDJ_LINK_SCREEN_H&&!(scr_bands>>(scr_row>>3)&1u))scr_row++;
-    if(scr_row>=LSDJ_LINK_SCREEN_H){scr_bands=0;return;}
-    unsigned y=scr_row++;
-    if(!(scr_row&7u))scr_bands&=~(1u<<(y>>3));
-    if(ota_wire_send(link_reply,lsdj_link_screen_pixels(screen,y,scr_round,link_reply)))scr_bands=0;   /* USB gone */
+    for(unsigned rows=0;scr_bands&&rows<12u;rows++){
+        uint32_t queued=so_w-so_r;
+        if(queued>SCR_QUEUE||(queued&&mo_w!=mo_r))return;
+        while(scr_row<LSDJ_LINK_SCREEN_H&&!(scr_bands>>(scr_row>>3)&1u))scr_row++;
+        if(scr_row>=LSDJ_LINK_SCREEN_H){scr_bands=0;return;}
+        unsigned y=scr_row;
+        uint32_t n=lsdj_link_screen_pixels(screen,y,scr_round,link_reply);
+        if(queued+(n+2u)/3u>SXQ)return;   /* not whole: next pass (the row is built again then) */
+        scr_row++;
+        if(!(scr_row&7u))scr_bands&=~(1u<<(y>>3));
+        if(ota_wire_send(link_reply,n)){scr_bands=0;return;}   /* USB gone */
+    }
 }
 static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,lk_reset,lk_firmware,lk_title,lk_live_known,
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,LK_BT_STAT,

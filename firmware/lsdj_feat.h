@@ -15,6 +15,8 @@
    FX THEME     MATCH / a theme  the FX panel's colours (MATCH: LSDj's theme); FM-1_980: on SETTINGS / DISPLAY, under THEME
    AUTOSAVE     OFF / 1 / 5 / 15 MIN  FM-1_981: save the song (and effects) once nothing has changed for 5 s,
                 at most this often, without stopping the music (on SETTINGS' top page)
+   SCREEN RATE  10 / 15 / 20 / 30 /S  FM-1_989: how often the FM-1 draws its screen (every 6th / 4th / 3rd /
+                2nd Game Boy frame); more costs CPU time next to the sound (on SETTINGS / DISPLAY)
 
    x: the stored bits are the value XOR x, so a word saved before the switch existed (0 bits) reads
    as its default (AUTOSAVE: 1 MIN).
@@ -25,14 +27,18 @@
 #include "lsdj_theme.h"
 
 enum { LSDJ_FEAT_WRAP, LSDJ_FEAT_GREY, LSDJ_FEAT_MUTEPOP, LSDJ_FEAT_CCSHOW, LSDJ_FEAT_CCOUT, LSDJ_FEAT_CHANNELS,
-       LSDJ_FEAT_KEYLIGHTS, LSDJ_FEAT_ANIM, LSDJ_FEAT_BATTERY, LSDJ_FEAT_THEME, LSDJ_FEAT_AUTOSAVE, LSDJ_FEAT_ITEMS };
+       LSDJ_FEAT_KEYLIGHTS, LSDJ_FEAT_ANIM, LSDJ_FEAT_BATTERY, LSDJ_FEAT_THEME, LSDJ_FEAT_AUTOSAVE, LSDJ_FEAT_RATE,
+       LSDJ_FEAT_ITEMS };
 #define LSDJ_FEAT_MAGIC 0x46u
 static const struct { const char *name; uint8_t shift, bits, n, def, x; } lsdj_feat_info[LSDJ_FEAT_ITEMS] = {
     {"PAGE WRAP", 0, 1, 2, 0, 0}, {"GREY MUTED", 1, 1, 2, 1, 0}, {"MUTE POPUP", 2, 1, 2, 1, 0}, {"SHOW CC", 3, 1, 2, 1, 0},
     {"CC OUT", 4, 1, 2, 0, 0}, {"KNOBS", 5, 1, 2, 0, 0}, {"PAGE LIGHTS", 6, 1, 2, 1, 0}, {"MODE LIGHTS", 7, 1, 2, 1, 0},
     {"BATTERY", 8, 1, 2, 1, 0}, {"FX THEME", 9, 7, LSDJ_THEMES + 1u, 0, 0}, {"AUTOSAVE", 16, 2, 4, 1, 1},
+    {"SCREEN RATE", 18, 2, 4, 0, 0},
 };
 static const char *const lsdj_feat_autosave_name[4] = {"OFF", "1 MIN", "5 MIN", "15 MIN"};
+static const char *const lsdj_feat_rate_name[4] = {"10/S", "15/S", "20/S", "30/S"};
+static const uint8_t lsdj_feat_rate_every[4] = {6u, 4u, 3u, 2u};   /* Game Boy frames per picture drawn */
 typedef struct { uint8_t v[LSDJ_FEAT_ITEMS]; } lsdj_feat_t;
 
 static void lsdj_feat_defaults(lsdj_feat_t *f) { for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++) f->v[i] = lsdj_feat_info[i].def; }
@@ -71,6 +77,7 @@ static void lsdj_feat_line(const lsdj_feat_t *f, unsigned item, char line[20]) {
     unsigned v = f->v[item % LSDJ_FEAT_ITEMS];
     t[2] = item == LSDJ_FEAT_THEME ? (v ? lsdj_theme_name[(v - 1u) % LSDJ_THEMES] : "MATCH")
          : item == LSDJ_FEAT_CHANNELS ? (v ? "CHANNELS" : "PARAMS") : item == LSDJ_FEAT_AUTOSAVE ? lsdj_feat_autosave_name[v & 3u]
+         : item == LSDJ_FEAT_RATE ? lsdj_feat_rate_name[v & 3u]
          : v ? "ON" : "OFF";
     uint32_t n = 0;
     for (unsigned k = 0; k < 3; k++) for (const char *c = t[k]; *c && n < 19u; c++) line[n++] = *c;

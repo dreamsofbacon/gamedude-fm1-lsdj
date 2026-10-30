@@ -27,7 +27,7 @@ int gp_frame(void);
 int gp_master_tick_peek(uint32_t *pos);
 void gp_master_tick_drop(void);
 /* Emulator on CPU1 (FM-1). Each field has one writer:
-     CPU0: pause_req, pause_gen, pic_ack, audio_target
+     CPU0: pause_req, pause_gen, pic_ack, audio_target, pic_every
      CPU1: paused_gen, pic_seq, heartbeat, busy_ticks, frames, last_ticks
    Pause: CPU0 bumps pause_gen, sets pause_req, waits for paused_gen == pause_gen
    (CPU1 is then between frames and touches nothing but this struct); clearing
@@ -38,6 +38,7 @@ typedef struct {
     volatile uint32_t pic_seq, pic_ack;
     volatile uint32_t heartbeat, busy_ticks, frames, last_ticks;
     volatile uint32_t audio_target;
+    volatile uint32_t pic_every;   /* draw a picture every this many frames (6: 10/s) */
 } gp_core1_t;
 extern gp_core1_t gp_core1;
 void gp_core1_step(void);   /* CPU1: one pass of its loop (in RAM) */

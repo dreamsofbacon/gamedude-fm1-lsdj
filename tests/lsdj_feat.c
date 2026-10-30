@@ -70,6 +70,11 @@ int main(void) {
     f.v[LSDJ_FEAT_AUTOSAVE] = 3; lsdj_feat_line(&f, LSDJ_FEAT_AUTOSAVE, l); assert(!strcmp(l, "AUTOSAVE: 15 MIN"));
     assert(lsdj_feat_unpack(lsdj_feat_pack(&f), &g) && g.v[LSDJ_FEAT_AUTOSAVE] == 3);
     f.v[LSDJ_FEAT_AUTOSAVE] = 1; lsdj_feat_line(&f, LSDJ_FEAT_AUTOSAVE, l); assert(!strcmp(l, "AUTOSAVE: 1 MIN"));
-    puts("PASS: feature switches: defaults, every value packs, refusals, turning, lines fit for every theme, autosave");
+    /* FM-1_989 SCREEN RATE: default 10/S (every 6th frame), the defaults' word unchanged */
+    lsdj_feat_defaults(&f); assert(!f.v[LSDJ_FEAT_RATE] && lsdj_feat_rate_every[0] == 6u && lsdj_feat_pack(&f) == 0x460001CEu);
+    lsdj_feat_line(&f, LSDJ_FEAT_RATE, l); assert(!strcmp(l, "SCREEN RATE: 10/S"));
+    f.v[LSDJ_FEAT_RATE] = 3; lsdj_feat_line(&f, LSDJ_FEAT_RATE, l); assert(!strcmp(l, "SCREEN RATE: 30/S") && lsdj_feat_rate_every[3] == 2u);
+    assert(lsdj_feat_pack(&f) == (0x460001CEu | 3u << 18) && lsdj_feat_unpack(lsdj_feat_pack(&f), &g) && g.v[LSDJ_FEAT_RATE] == 3);
+    puts("PASS: feature switches: defaults, every value packs, refusals, turning, lines fit for every theme, autosave, screen rate");
     return 0;
 }

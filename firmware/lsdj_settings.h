@@ -140,7 +140,8 @@ static unsigned lsdj_menu_entries(unsigned page, uint8_t e[LSDJ_MENU_MAX]) {
     static const uint8_t top[] = {LSDJ_MENU_CAT(LSDJ_PAGE_CONTROLS), LSDJ_MENU_CAT(LSDJ_PAGE_DISPLAY), LSDJ_MENU_CAT(LSDJ_PAGE_MIDI),
                                   LSDJ_MENU_CAT(LSDJ_PAGE_FEAT), LSDJ_MENU_FEAT(LSDJ_FEAT_AUTOSAVE)};   /* FM-1_981: AUTOSAVE right here */
     static const uint8_t controls[] = {LSDJ_MENU_BACK, LSDJ_SET_KNOBS, LSDJ_SET_PRESETS_DIR, LSDJ_SET_ALGO_DIR, LSDJ_SET_PLAYREC, LSDJ_SET_SELKEY};
-    static const uint8_t display[] = {LSDJ_MENU_BACK, LSDJ_SET_THEME, LSDJ_MENU_FEAT(LSDJ_FEAT_THEME), LSDJ_SET_POPUP, LSDJ_SET_METER};   /* FX THEME under THEME */
+    static const uint8_t display[] = {LSDJ_MENU_BACK, LSDJ_SET_THEME, LSDJ_MENU_FEAT(LSDJ_FEAT_THEME), LSDJ_SET_POPUP, LSDJ_SET_METER,
+                                      LSDJ_MENU_FEAT(LSDJ_FEAT_RATE)};   /* FX THEME under THEME; FM-1_989 SCREEN RATE */
     unsigned n = 0;
     switch (page) {
     case LSDJ_PAGE_CONTROLS: for (unsigned i = 0; i < sizeof controls; i++) e[n++] = controls[i]; break;
@@ -152,8 +153,8 @@ static unsigned lsdj_menu_entries(unsigned page, uint8_t e[LSDJ_MENU_MAX]) {
         break;
     case LSDJ_PAGE_FEAT:
         e[n++] = LSDJ_MENU_BACK;
-        for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++)   /* FX THEME: on DISPLAY; AUTOSAVE: the top page */
-            if (i != LSDJ_FEAT_THEME && i != LSDJ_FEAT_AUTOSAVE) e[n++] = (uint8_t)LSDJ_MENU_FEAT(i);
+        for (unsigned i = 0; i < LSDJ_FEAT_ITEMS; i++)   /* FX THEME, SCREEN RATE: on DISPLAY; AUTOSAVE: the top page */
+            if (i != LSDJ_FEAT_THEME && i != LSDJ_FEAT_AUTOSAVE && i != LSDJ_FEAT_RATE) e[n++] = (uint8_t)LSDJ_MENU_FEAT(i);
         break;
     default: for (unsigned i = 0; i < sizeof top; i++) e[n++] = top[i]; break;
     }

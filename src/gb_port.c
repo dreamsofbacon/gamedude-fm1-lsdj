@@ -467,7 +467,7 @@ int gp_wram_poke_many(const uint16_t *addr, const uint8_t *v, uint32_t n) {
 
 /* Emulator on CPU1 (FM-1). CPU1 calls gp_core1_step() in a loop; CPU0 handles
    input, sound output, the display and saving. See gb_port.h for the fields. */
-gp_core1_t gp_core1 = { .audio_target = GP_AUDIO_TARGET };
+gp_core1_t gp_core1 = { .audio_target = GP_AUDIO_TARGET, .pic_every = 6u };
 static uint32_t pic_frame;
 GP_RAM void gp_core1_step(void) {
     gp_core1_t *s = &gp_core1;
@@ -478,8 +478,8 @@ GP_RAM void gp_core1_step(void) {
     }
     if (write_pos - read_pos >= s->audio_target) return;   /* sound buffer full: wait */
     uint32_t t0 = GP_TICKS();
-    /* Draw this frame only if CPU0 has taken the last picture and 6 frames passed. */
-    int render = s->pic_ack == s->pic_seq && frames - pic_frame >= 6u;
+    /* Draw this frame only if CPU0 has taken the last picture and pic_every frames passed. */
+    int render = s->pic_ack == s->pic_seq && frames - pic_frame >= s->pic_every;
     gb.direct.frame_skip = 0; gb.display.lcd_draw_line = render ? line : 0;
     if (gp_frame_ram()) {
         if (render) { pic_frame = frames; BARRIER(); s->pic_seq++; }

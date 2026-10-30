@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
     assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_WRAP));
     {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l);
         /* FM-1_980: FX THEME is on DISPLAY (under THEME), FM-1_981: AUTOSAVE on the top page; not here */
-        assert(cnt == LSDJ_FEAT_ITEMS + 1u && !strcmp(l[0], "SETTINGS/FX+LIGHTS") && !strcmp(l[2], "PAGE WRAP: OFF"));
+        assert(cnt == LSDJ_FEAT_ITEMS && !strcmp(l[0], "SETTINGS/FX+LIGHTS") && !strcmp(l[2], "PAGE WRAP: OFF"));
         assert(!strcmp(l[3], "GREY MUTED: ON") && !strcmp(l[7], "KNOBS: PARAMS") && !strcmp(l[10], "BATTERY: ON")); }
     /* FM-1_980: the rest of the turn that opened the page changes nothing (it switched PAGE WRAP on);
        a click while waiting starts the wait again */
@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, -1); lsdj_menu_knobs(&m, &s, &mi, &fe, k1, 0);
     assert(m.page == LSDJ_PAGE_DISPLAY && lsdj_menu_entry(&m) == LSDJ_SET_THEME);
     {   char l[LSDJ_MENU_LINES][20]; unsigned cnt = lsdj_menu_lines(&m, &s, &mi, &fe, 0, l);
-        assert(cnt == 7u && !strcmp(l[0], "SETTINGS/DISPLAY") && !strncmp(l[2], "THEME: ", 7) && !strcmp(l[3], "FX THEME: MATCH")); }
+        assert(cnt == 8u && !strcmp(l[0], "SETTINGS/DISPLAY") && !strncmp(l[2], "THEME: ", 7) && !strcmp(l[3], "FX THEME: MATCH")); }
     still(&m);
     lsdj_menu_knobs(&m, &s, &mi, &fe, no, 1); assert(lsdj_menu_entry(&m) == LSDJ_MENU_FEAT(LSDJ_FEAT_THEME));
     { int32_t s2[4] = {0, 1, 0, 0}; assert(lsdj_menu_knobs(&m, &s, &mi, &fe, s2, 0) == 3 && fe.v[LSDJ_FEAT_THEME] == 8); }   /* K2: 8 */

@@ -510,6 +510,7 @@ static void fx_load(void){
 }
 /* The feature switches the effects controls use (KNOBS = CHANNELS starts on its first effect). */
 static void feat_apply(void){
+    gp_core1.pic_every=lsdj_feat_rate_every[feat.v[LSDJ_FEAT_RATE]&3u];   /* SCREEN RATE (both paths) */
     if(fxu.channels!=feat.v[LSDJ_FEAT_CHANNELS]){fxu.channels=feat.v[LSDJ_FEAT_CHANNELS];fxu.param=0;fxu.page=FX_PAGE_FILTER;}
 }
 /* Themes (firmware/lsdj_theme.h): the screen's four colours and the overlay's. */
@@ -1381,8 +1382,8 @@ void gb_cstart(const uint32_t *parameters){
             fm1_input_frame();
 #endif
             uint32_t t0=fm1_ticks();
-            /* Only the frame that will be sent to the LCD is drawn (every 6th). */
-            gp_render(gp_frame_count()+1u-drawn>=6u);
+            /* Only the frame that will be sent to the LCD is drawn (every pic_every-th: SCREEN RATE). */
+            gp_render(gp_frame_count()+1u-drawn>=gp_core1.pic_every);
             gp_frame();
             lsdj_cpu_frame(&cpu,fm1_ticks()-t0);worked=1;
 #if !GB_SMK37
@@ -1398,7 +1399,7 @@ void gb_cstart(const uint32_t *parameters){
             display_frame();display_count++;
             cpu.lcd+=fm1_ticks()-t0;worked=1;
         }
-        if(!emu1 && display_ok && !video_pending && gp_frame_count()-drawn>=6 && display_ready()){
+        if(!emu1 && display_ok && !video_pending && gp_frame_count()-drawn>=gp_core1.pic_every && display_ready()){
             uint32_t t0=fm1_ticks();
             native_draw();video_submit(gp_pixels());drawn=gp_frame_count();
             if(!video_online){

@@ -53,8 +53,8 @@ int main(int argc, char **argv) {
     lsdj_slot_t map;
     int error = lsdj_slot_parse(slot, (uint32_t)len, &map);
     if (!error) {
-        gp_set_bank_map(map.bank_map, map.logical_banks);
-        error = gp_load(slot + LSDJ_SLOT_HDR, map.logical_banks * LSDJ_SLOT_BANK);
+        gp_set_bank_map(map.bank_map, map.logical_banks, map.start, map.len);
+        error = gp_load(slot + map.data_off, map.logical_banks * LSDJ_SLOT_BANK);
     }
     if (!error && argc == 3) {
         f = fopen(argv[2], "rb");

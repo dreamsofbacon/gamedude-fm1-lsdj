@@ -13,7 +13,8 @@ enum { GP_OK=0, GP_SHORT=1, GP_COLOR=2, GP_ROM_SIZE=3, GP_RAM_SIZE=4,
        GP_CHECKSUM=5, GP_MAPPER=6, GP_CPU=7, GP_TIMEOUT=8 };
 int gp_load(const uint8_t *rom, uint32_t size);
 /* Sparse cartridge: call before gp_load, which then takes the logical size. */
-void gp_set_bank_map(const uint8_t *map, uint32_t banks);
+/* start/len: per stored bank (LSDj slot v2), or NULL for 16 KiB banks back to back */
+void gp_set_bank_map(const uint8_t *map, uint32_t banks, const uint32_t *start, const uint16_t *len);
 int gp_frame(void);
 /* Sound samples the emulator keeps queued (44.1 kHz): 2955 = 67 ms, four frames, the
    room slow frames and the effects need (alpha 56-59 had 1300, 29 ms: crunchy on the

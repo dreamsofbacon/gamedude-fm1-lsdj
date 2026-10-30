@@ -4,7 +4,7 @@ from pathlib import Path
 from diagnostic import make_rom
 from prepare_apu import prepare
 ROOT=Path(__file__).resolve().parents[1]
-LSDJ_SLOT_PRODUCT='FM-1_990'
+LSDJ_SLOT_PRODUCT='FM-1_991'
 DEFAULT_ZIG=ROOT.parent/'Felucca/Felucca-website/build/wasm-tools/ziglang/zig.exe'
 # JieLi toolchain: $JIELI_TOOLCHAIN, else ~/.jieli/toolchain (Dinghy's get_toolchain.sh), else the upstream path.
 DEFAULT_TC=next((str(p) for p in [Path.home()/'.jieli/toolchain'] if p.is_dir()),
@@ -28,14 +28,14 @@ def main():
     p.add_argument('--toolchain',default=os.environ.get('JIELI_TOOLCHAIN',DEFAULT_TC))
     p.add_argument('--rom',type=Path)
     p.add_argument('--rom-capacity',type=int,default=0,help='Reserve cartridge bytes for the browser ROM packer')
-    p.add_argument('--lsdj-slot',type=int,default=0,help='FM-1: empty browser-patchable LSDj slot (256 + N * 16384 bytes)')
+    p.add_argument('--lsdj-slot',type=int,default=0,help='FM-1: empty browser-patchable LSDj slot (bytes, a multiple of 256, at least 256 + 16384)')
     p.add_argument('--kits',type=int,default=None,help='Sparse cartridge (automatic above 512 KiB): LSDj kit banks to keep (default 3)')
     p.add_argument('--ble',action='store_true',help='FM-1: Bluetooth MIDI (firmware/lsdj_ble.c, the JieLi BT libraries)')
     p.add_argument('--ble-sdk',default=os.environ.get('AC79_BT_SDK','/root/ac79-sdk-bt'),help='AC79 SDK with the pinned BT libraries (vendor/hortator-ble/tools/ble_libs.py)')
     a=p.parse_args()
     if a.lsdj_slot and (a.target!='fm1' or a.rom or a.kits is not None or a.rom_capacity or a.ble or
-                       a.lsdj_slot<16640 or a.lsdj_slot>0x8dfbc or (a.lsdj_slot-256)%16384):
-        p.error('--lsdj-slot requires FM-1, 256 + N * 16384 bytes, and no ROM, kits, capacity or BLE option')
+                       a.lsdj_slot<16640 or a.lsdj_slot>0x8dfbc or a.lsdj_slot%256):
+        p.error('--lsdj-slot requires FM-1, a multiple of 256 bytes (at least 16640), and no ROM, kits, capacity or BLE option')
     (ROOT/'build').mkdir(exist_ok=True);(ROOT/'web').mkdir(exist_ok=True)
     prepare(ROOT)
     includes=['-Isrc','-Ivendor/peanut-gb']

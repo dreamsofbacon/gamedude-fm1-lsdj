@@ -903,7 +903,7 @@ static uint32_t lk_midi_get(void){return lsdj_midi_pack(&midi);}
 static int lk_midi_set(uint32_t v){lsdj_midi_t t;if(!lsdj_midi_unpack(v,&t))return 0;midi=t;return 1;}
 static const volatile uint8_t *lk_cartridge(uint32_t *len){
 #ifdef CART_SLOT_CAPACITY
-    *len=LSDJ_SLOT_HDR+cart_slot.stored_banks*LSDJ_SLOT_BANK;
+    *len=cart_slot.total;   /* header (+ v2 bank table) + data, as the page reads it back */
     if(cart_slot_valid&&cart_slot.stored_banks&&*len<=CART_SLOT_CAPACITY)return cartridge;
 #else
     (void)len;
@@ -1234,11 +1234,11 @@ void gb_cstart(const uint32_t *parameters){
 #if defined(CART_SLOT_CAPACITY)
     int slot_error=lsdj_slot_parse(cart_header,CART_SLOT_CAPACITY,&cart_slot);
     cart_slot_valid=(uint8_t)(slot_error==LSDJ_SLOT_OK);
-    if(!slot_error)gp_set_bank_map(cart_slot.bank_map,cart_slot.logical_banks);
-    if(slot_error||gp_load(cartridge+LSDJ_SLOT_HDR,cart_slot.logical_banks*LSDJ_SLOT_BANK)){
+    if(!slot_error)gp_set_bank_map(cart_slot.bank_map,cart_slot.logical_banks,cart_slot.start,cart_slot.len);
+    if(slot_error||gp_load(cartridge+cart_slot.data_off,cart_slot.logical_banks*LSDJ_SLOT_BANK)){
 #elif defined(CART_SPARSE_BANKS)
     /* Sparse cartridge (tools/build.py): only code + chosen kit banks are stored. */
-    (void)cart_header;gp_set_bank_map(cart_bank_map,CART_SPARSE_BANKS);
+    (void)cart_header;gp_set_bank_map(cart_bank_map,CART_SPARSE_BANKS,0,0);
     uint32_t cart_size=CART_SPARSE_BANKS*16384u;
     if(gp_load(cartridge,cart_size)) {
 #else

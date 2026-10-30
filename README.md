@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_990). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_991). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). Bluetooth uses DEADACTIVE's [Hortator](https://github.com/DEADACTIVE/Hortator) port of the JieLi BT libraries (GPL-3.0). GameDude's own README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,19 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # GameDude - FM-1 / SMK37 — v2.0
+
+## LSDj Burrito: every sample kit fits (FM-1_991)
+
+- **Kits are stored without their empty filler.** A kit often uses only part of its 16 KiB bank;
+  the rest is 0xFF. Slot version 2 (src/lsdj_slot.h) stores each bank only up to its last
+  non-0xFF byte, with a table of start and length per bank; gb_port.c's rom_read returns 0xFF past
+  a bank's length, so LSDj reads exactly the bytes it did before (same per-read cost: one table
+  lookup and a compare). The slot is now every byte left in the app area (503296 bytes here, was
+  30 whole banks / 491776). A stock LSDj 9.3.9 (13 program banks, 21 kits) needs 464269 bytes:
+  all 21 kits fit (17 before), 39 KB to spare. Song saves are untouched (128 KiB save RAM, its own
+  flash store).
+- Slot version 1 (FM-1_990 and older) is still read: by the firmware and by the web page when it
+  reads an installed LSDj back for an update.
 
 ## LSDj Burrito: the FM-1 pushes its screen to the web page (FM-1_990)
 
@@ -216,9 +229,9 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_990 LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_991 LSDj template for the sibling Burrito
 website. This is separate from the upstream GameDude library workflow below.
-Normal ROM builds use the current alpha identity (FM-1_990 for alpha 90).
+Normal ROM builds use the current alpha identity (FM-1_991 for alpha 91).
 
 From this repository in WSL:
 

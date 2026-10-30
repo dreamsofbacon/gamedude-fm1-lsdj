@@ -133,9 +133,13 @@ static const uint16_t palettes[4][4] = {
 static uint16_t custom_palette[4];
 static const uint16_t *volatile pal = palettes[0];
 /* Optional sparse cartridge: bank_map[logical bank] = stored bank, 0xff = absent
-   (reads 0xff, e.g. an empty LSDj kit slot). Bank 0 must be stored first. */
+   (reads 0xff, e.g. an empty LSDj kit slot). Bank 0 must be stored first.
+   bank_start / bank_len (NULL: 16 KiB banks back to back): where each stored bank
+   starts and how much of it is stored; past that it reads 0xff (LSDj slot v2). */
 static const uint8_t *bank_map;
 static uint32_t bank_map_n;
+static const uint32_t *bank_start;
+static const uint16_t *bank_len;
 #if GP_BANK0_RAM
 /* LSDj's bank 0 takes 60-74% of its ROM reads while a song plays: keep it in RAM.
    (Bank 2 in RAM as well, alpha 26, made no measurable difference on the FM-1:
@@ -148,13 +152,17 @@ GP_RAM static uint8_t rom_read(struct gb_s *g, uint_fast32_t a) {
     if (a < 0x4000u) return bank0_ram[a];
 #endif
     if (bank_map) {
-        uint32_t b = (uint32_t)a >> 14;
+        uint32_t b = (uint32_t)a >> 14, o = (uint32_t)a & 0x3fff;
         uint8_t s = b < bank_map_n ? bank_map[b] : 0xff;
-        return s == 0xff ? 0xff : cart[((uint32_t)s << 14) | (a & 0x3fff)];
+        if (s == 0xff) return 0xff;
+        if (bank_len) return o < bank_len[s] ? cart[bank_start[s] + o] : 0xff;
+        return cart[((uint32_t)s << 14) | o];
     }
     return a < cart_size ? cart[a] : 0xff;
 }
-void gp_set_bank_map(const uint8_t *map, uint32_t banks) { bank_map = map; bank_map_n = banks; }
+void gp_set_bank_map(const uint8_t *map, uint32_t banks, const uint32_t *start, const uint16_t *len) {
+    bank_map = map; bank_map_n = banks; bank_start = start; bank_len = start ? len : 0;
+}
 GP_RAM static uint8_t ram_read(struct gb_s *g, uint_fast32_t a) {
     (void)g; return a < save_size ? save[a] : 0xff;
 }
@@ -199,6 +207,7 @@ int gp_load(const uint8_t *rom, uint32_t n) {
 #if GP_BANK0_RAM
     {   /* bank 0 as the emulator reads it (sparse map: stored bank 0 comes first) */
         uint32_t k = n < sizeof bank0_ram ? n : (uint32_t)sizeof bank0_ram;
+        if (bank_map && bank_len && k > bank_len[0]) k = bank_len[0];   /* slot v2: the rest reads 0xff */
         for (uint32_t i = 0; i < sizeof bank0_ram; i++) bank0_ram[i] = i < k ? rom[i] : 0xff;
     }
 #endif

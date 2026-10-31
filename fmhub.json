@@ -1,0 +1,8 @@
+{
+  "what": "Little Sound Dj, the Game Boy tracker, on the FM-1: played from its keys and knobs, with per-channel filters, drive, lo-fi and an LFO, a shared echo and compressor, MIDI sync and colour themes. Bring your own LSDj: the project's web page adds it to this firmware on your computer.",
+  "author": "Dreamy_bacon",
+  "kinds": ["tracker"],
+  "play": "https://dreamsofbacon.github.io/lsdj-burrito/#emulator-sec",
+  "editor": "https://dreamsofbacon.github.io/lsdj-burrito/#connect",
+  "image": "docs/card.png"
+}

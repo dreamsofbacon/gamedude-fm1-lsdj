@@ -10,7 +10,7 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 
 ---
 
-# LSDJ Burrito firmware (based on GameDude for FM-1 / SMK37)
+# LSDJ Burrito firmware (based on GameDude)
 
 ## LSDj Burrito: note mode sets LSDj's SYNC to KEYBD (FM-1_995)
 
@@ -333,7 +333,6 @@ Native firmware needs WSL and the JieLi pi32v2 toolchain (`JIELI_TOOLCHAIN` over
 ```sh
 python3 tools/lsdj_template.py --toolchain /path/to/jieli/toolchain --sdk /path/to/ac79-sdk   # the website's template
 python3 tools/build.py fm1 --rom /path/to/lsdj.gb --kits 3                                  # a private build (never publish)
-python3 tools/build.py smk37 --toolchain /path/to/jieli/toolchain
 python3 tools/build.py test --zig /path/to/zig
 ```
 
@@ -350,10 +349,3 @@ GPL-3.0-only integration with retained third-party notices. See [LICENSE](LICENS
 - Original GameDude pixel logo, startup animation and diagnostic cartridge are project assets. Game Boy and Nintendo are trademarks of Nintendo. This independent project is not affiliated with Nintendo.
 
 Dual-core hardware trial: FM-1_934 was installed and verified responding over USB. CPU1 now completes immutable-frame scaling while CPU0 retains GB/APU emulation, audio interrupts, controls and USB. Initial hardware samples confirmed core ID 1, an increasing completed-job count, and no CPU1 faults or fallbacks. This corrects the earlier assumption that CPU1 never started: trial 933 reached its worker loop but fell back before accepting a frame. Build 934 fixes late-completion timeout handling and removes per-pixel division from the scaler. Host tests, FM-1/SMK builds and simulated install/restore pass. The owner confirmed normal picture, controls and sound. Longer stability testing remains pending. The v2.0 flasher serves build 938, retaining CPU1 scaling, the inner directional keys and grouped LED feedback on FM-1, with CPU1 also enabled on SMK. See [CPU1 trial notes](docs/CPU1_TRIAL.md).
-
-## SMK flash compatibility release
-
-The SMK update and stock-restore path now accepts the reported EB6014 flash
-chip alongside 856014 and displays detailed loader failures. Update older
-Windows USB-helper checkouts before installing this release.
-See [release scope, evidence and recovery limits](docs/SMK_FLASH_COMPATIBILITY.md).

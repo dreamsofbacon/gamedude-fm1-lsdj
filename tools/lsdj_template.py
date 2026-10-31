@@ -1,7 +1,7 @@
 """Build the public LSDj firmware template: GameDude for FM-1 with an EMPTY ROM slot.
 
 The sibling Burrito website writes each user's own LSDj into the slot locally.
-The generic experimental template has identity FM-1_5370995, short name FM-1_995 (note mode sets LSDj's SYNC to KEYBD; no Bluetooth; its own firmware number; every sample kit fits: banks stored without their 0xFF filler; the FM-1 pushes each new screen picture to the web page; SCREEN RATE setting: the FM-1 draws 10, 15, 20 or 30 pictures a second; screen mirror rows sent back to back; screen mirror from the LCD image; other LSDj versions: cursor FX and LFO tempo, custom palettes accepted; faster screen mirror; knobs / SELECT: channel pages, FX: master pages with the echo; screen mirror for the web page; AUTOSAVE; echo mix and time on MASTER, settings knob fix; echo send on FILTER K2, FX+LIGHTS switches; hold-FX master page; all LSDj 9.3.9 helpers for the
+The generic experimental template has identity FM-1_537000996, short name FM-1_996, release 0.9.96 (an empty slot boots to an add-your-LSDj screen; release numbering; note mode sets LSDj's SYNC to KEYBD; no Bluetooth; its own firmware number; every sample kit fits: banks stored without their 0xFF filler; the FM-1 pushes each new screen picture to the web page; SCREEN RATE setting: the FM-1 draws 10, 15, 20 or 30 pictures a second; screen mirror rows sent back to back; screen mirror from the LCD image; other LSDj versions: cursor FX and LFO tempo, custom palettes accepted; faster screen mirror; knobs / SELECT: channel pages, FX: master pages with the echo; screen mirror for the web page; AUTOSAVE; echo mix and time on MASTER, settings knob fix; echo send on FILTER K2, FX+LIGHTS switches; hold-FX master page; all LSDj 9.3.9 helpers for the
 verified program, so SEQ, tempo, cues and MIDI sync work) with a master FX bypass
 and reorganized controls. It supports read-only cartridge export for ROM-free updates
 and retains cursor FX support
@@ -71,7 +71,7 @@ def main():
     web=a.output_dir;web.mkdir(parents=True,exist_ok=True)
     (web/'fm1-lsdj-template.fwsc').write_bytes(raw)
     print(subprocess.check_output([ota,web/'fm1-lsdj-template.fwsc'],cwd=ROOT,text=True).strip())
-    meta={'product':product,'version':m['version'],'package':'fm1-lsdj-template.fwsc','sha256':sha(raw),
+    meta={'product':product,'version':m['version'],'release':m['release'],'package':'fm1-lsdj-template.fwsc','sha256':sha(raw),
           'cartridge_offset':offset,'cartridge_capacity':capacity,'lsdj_slot':1,
           'usb_updater':True,'usb_protocol':'fm1-ota-v1',
           'protected_app_sha256':hashlib.sha256(app[:offset]+app[offset+capacity:]+b'\xff'*(APP_MAX-len(app))).hexdigest(),

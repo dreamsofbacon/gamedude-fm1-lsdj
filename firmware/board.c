@@ -448,7 +448,9 @@ static void cc_show(unsigned c,unsigned cc){
     lsdj_ov_show(&ov,l1,l2,fm1_ms);
 }
 static uint8_t midi_note_told;
+static uint8_t lsdj_absent;   /* no LSDj in the slot (no_lsdj): no link, no MIDI */
 static void midi_in(uint32_t pkt,uint32_t at_ms,uint32_t src){
+    if(lsdj_absent)return;
     uint8_t st=(uint8_t)(pkt>>8),d1=(uint8_t)(pkt>>16);
     switch(lsdj_midi_route(&midi,pkt,src)){
     case LSDJ_MIDI_CLOCK:case LSDJ_MIDI_TRANSPORT:break;   /* below */
@@ -978,7 +980,7 @@ static const lsdj_link_io_t link_io={lk_save,lk_size,lk_pause,lk_store,lk_load,l
     lk_settings_get,lk_settings_set,lk_fx_get,lk_fx_set,lk_theme_get,lk_theme_set,lk_store_config,lk_live,
     lk_midi_get,lk_midi_set,lk_cartridge,lk_mute_set,lk_feat_get,lk_feat_set,lk_screen,lk_screen_stream};
 static int app_sysex_frame(const uint8_t *frame,uint32_t size){
-    if(!lsdj_link_match(frame,size))return 0;
+    if(lsdj_absent||!lsdj_link_match(frame,size))return 0;
     ota_wire_send(link_reply,lsdj_link_handle(&link_state,&link_io,frame,size,fm1_ms,link_reply));
     return 1;
 }
@@ -1108,7 +1110,7 @@ static void boot_splash(int display_ok){
 #if GB_SMK37
             gd_splash_draw(screen,ms);
 #else
-            lsdj_splash_draw(screen,ms,gd_splash_y(ms)-84,BURRITO_VERSION,&splash_col);
+            lsdj_splash_draw(screen,ms,gd_splash_y(ms)-84,BURRITO_RELEASE,&splash_col);
 #endif
             display_frame();next_draw=ms+33u;
             if(ms>=GD_SPLASH_LAND_MS)landing_frame=1;
@@ -1116,6 +1118,30 @@ static void boot_splash(int display_ok){
     }
     while(display_ok&&!display_ready())fm1_wdt_feed();
 }
+#if defined(CART_SLOT_CAPACITY)
+/* No LSDj in the slot: the release file on GitHub / The Firmware Hub (the template as built, slot empty),
+   or a slot that does not check out. Say how to add one, and keep USB and the update loader running so
+   the web page, or any updater, can install firmware; the boot counts as healthy (no recovery loop). */
+static void no_lsdj(int display_ok){
+    lsdj_absent=1;
+    input_init();recovery_init();fm1_irq_enable_all();
+    if(display_ok){
+        const lsdj_splash_colors_t *c=&lsdj_splash_default;
+        lsdj_splash_draw(screen,1600u,0,BURRITO_RELEASE,c);
+        lsdj_ov_text_c(screen,LSDJ_OV_W/2u,148u,"NO LSDJ ON THIS FM-1 YET",c->accent,1u);
+        lsdj_ov_text_c(screen,LSDJ_OV_W/2u,159u,"ADD YOUR OWN WITH THE WEB PAGE:",c->text,1u);
+        lsdj_ov_text_c(screen,LSDJ_OV_W/2u,169u,"DREAMSOFBACON.GITHUB.IO/LSDJ-BURRITO",c->text,1u);
+        while(!display_ready())fm1_wdt_feed();
+        display_frame();
+        while(!display_ready())fm1_wdt_feed();
+    }
+    uint32_t start=fm1_ms;
+    for(;;){
+        fm1_wdt_feed();recovery_service();
+        if(fm1_ms-start>5000u)smk37_bootguard_healthy(&gb_bootguard);
+    }
+}
+#endif
 /* MIDI clock out (CLOCK OUT): LSDj leading (SYNC = LSDJ, playing) sends one link byte a
    tick; each goes out as a MIDI clock (F8) when that moment of the sound is heard, Start
    before the first, Stop when they stop (lsdj_midi.h). */
@@ -1183,6 +1209,9 @@ void gb_cstart(const uint32_t *parameters){
 #else
     uint32_t cart_size=cart_header[0x148]<=4?(32768u<<cart_header[0x148]):0;
     if(!cart_size||cart_size>sizeof cartridge||gp_load(cartridge,cart_size)) {
+#endif
+#if defined(CART_SLOT_CAPACITY)
+        no_lsdj(display_ok);   /* never returns */
 #endif
         /* Invalid embedded cartridge: allow bootguard/watchdog recovery. */
         for(;;);

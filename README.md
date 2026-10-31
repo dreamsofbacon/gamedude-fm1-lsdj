@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_995, package identity FM-1_5370995). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** 0.9.96, alpha (package identity FM-1_537000996). Releases: the [GitHub releases](https://github.com/dreamsofbacon/lsdj-burrito-src/releases) carry the firmware file, with no LSDj in it: on an FM-1 it asks you to add your own with the web page. Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). No Bluetooth (removed in FM-1_994, with GameDude's game library loader and website). The firmware README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,18 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # LSDJ Burrito firmware (based on GameDude)
+
+## LSDJ Burrito 0.9.96: release numbering, and a firmware file without LSDj
+
+- **Release numbering** (The Firmware Hub): from now on one version, MAJOR.MINOR.PATCH, published as a GitHub
+  release `v0.9.96` with the firmware file attached. The package identity is FM-1_537 + two digits each:
+  **FM-1_537000996** (FM-1_5370992 .. FM-1_5370995 before). Inside, the FM-1 and the web page keep the short
+  name FM-1_996 (MAJOR x 10000 + MINOR x 100 + PATCH), so 0.9.96 follows 995. tools/build.py LSDJ_RELEASE.
+- **The release file has no LSDj** (LSDj is not ours to share): it is the web page's template with an empty
+  slot. On an FM-1 it now boots to the LSDJ BURRITO splash with "NO LSDJ ON THIS FM-1 YET" and the web
+  page's address, with USB and the update loader running, so the web page adds your own LSDj (or any
+  updater installs another firmware). Before, an empty slot stopped at boot.
+- The splash shows VERSION 0.9.96.
 
 ## LSDj Burrito: note mode sets LSDj's SYNC to KEYBD (FM-1_995)
 
@@ -259,7 +271,7 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_995 (package identity FM-1_5370995) LSDj template for the sibling Burrito
+This fork also builds the ROM-free LSDJ Burrito 0.9.96 (package identity FM-1_537000996, short name FM-1_996) LSDj template for the sibling Burrito
 website.
 Local ROM builds (never published) keep FM-1_9NN in firmware/fm1_recovery.h.
 

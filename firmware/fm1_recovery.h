@@ -12,10 +12,12 @@
    Felucca's updater and the web installer take it (up to 20 characters). Bump per release. */
 #ifdef CART_SLOT_CAPACITY
 #define FELUCCA_ID CART_SLOT_PRODUCT   /* the package identity: FM-1_537 + version (FM-1_992 on) */
-#define BURRITO_VERSION CART_SLOT_VERSION   /* the short name: link INFO (8 bytes) and the splash */
+#define BURRITO_VERSION CART_SLOT_VERSION   /* the short name: link INFO (8 bytes) */
+#define BURRITO_RELEASE CART_SLOT_RELEASE   /* the release version (0.9.96): the splash */
 #else
 #define FELUCCA_ID "FM-1_976"
 #define BURRITO_VERSION FELUCCA_ID
+#define BURRITO_RELEASE FELUCCA_ID
 #endif
 #define RING_PUBLISH() __asm__ volatile("csync" ::: "memory")
 /* The flash driver may also write the LSDj save pool (lsdj_state.h, 0x97000..0xE0000 =

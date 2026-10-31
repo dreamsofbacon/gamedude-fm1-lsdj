@@ -52,9 +52,13 @@ static void lsdj_splash_draw(uint16_t *scr, uint32_t ms, int y_drop, const char 
         }
     }
     lsdj_splash_title(scr, y_drop, col);                /* over the burst */
-    char ver[12] = "ALPHA ";
-    uint32_t n = 6, len = lsdj_ov_len(id);
-    if (len >= 2u) { ver[n++] = id[len - 2u]; ver[n++] = id[len - 1u]; }
+    /* a release version ("0.9.96": "VERSION 0.9.96"), or an identity "FM-1_9NN": "ALPHA NN" */
+    char ver[24] = "ALPHA ";
+    uint32_t n = 6, len = lsdj_ov_len(id), dotted = 0;
+    for (uint32_t i = 0; i < len; i++) if (id[i] == '.') dotted = 1;
+    if (dotted && len <= 15u) { const char *v = "VERSION "; n = 0; while (v[n]) { ver[n] = v[n]; n++; }
+        for (uint32_t i = 0; i < len; i++) ver[n++] = id[i]; }
+    else if (len >= 2u) { ver[n++] = id[len - 2u]; ver[n++] = id[len - 1u]; }
     ver[n] = 0;
     lsdj_ov_text_c(scr, LSDJ_OV_W / 2u, 182u, ver, col->dim, 1u);
     lsdj_ov_text_c(scr, LSDJ_OV_W / 2u, 196u, "BASED ON GAMEDUDE - GPL-3.0", col->dim, 1u);

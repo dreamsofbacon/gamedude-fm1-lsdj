@@ -8,8 +8,16 @@ ROOT=Path(__file__).resolve().parents[1]
 # (FM-1_992 on: FM-1_9NN overlaps other firmwares). LSDJ_VERSION is the short name the web page's link
 # (8 bytes in INFO) and the splash use. FM-1_993 went to a private Bluetooth build (since removed), so
 # FM-1_994 is the next public one.
-LSDJ_VERSION='FM-1_995'
-LSDJ_SLOT_PRODUCT='FM-1_537'+LSDJ_VERSION[5:].zfill(4)
+# From 0.9.96 (The Firmware Hub): one release version, MAJOR.MINOR.PATCH, as the GitHub release (v0.9.96)
+# and the hub show it. The package identity is FM-1_537 + two digits each (FM-1_537000996, like other
+# firmwares' FM-1_<prefix><MMmmpp>); the short name FM-1_ + MAJOR*10000 + MINOR*100 + PATCH (FM-1_996, so
+# the numbers the page compares keep counting: 995 was FM-1_5370995) fits link INFO's 8 bytes up to 0.99.99.
+LSDJ_RELEASE='0.9.96'
+_maj,_min,_pat=(int(v) for v in LSDJ_RELEASE.split('.'))
+assert all(0<=v<100 for v in (_maj,_min,_pat))
+LSDJ_VERSION='FM-1_'+str(_maj*10000+_min*100+_pat)
+assert len(LSDJ_VERSION)<=8,'the short name must fit link INFO (8 bytes): see firmware/lsdj_link.h'
+LSDJ_SLOT_PRODUCT=f'FM-1_537{_maj:02}{_min:02}{_pat:02}'
 DEFAULT_ZIG=ROOT.parent/'Felucca/Felucca-website/build/wasm-tools/ziglang/zig.exe'
 # JieLi toolchain: $JIELI_TOOLCHAIN, else ~/.jieli/toolchain (Dinghy's get_toolchain.sh), else the upstream path.
 DEFAULT_TC=next((str(p) for p in [Path.home()/'.jieli/toolchain'] if p.is_dir()),
@@ -97,7 +105,7 @@ def native(a,sources):
         storage=rom+b'\xff'*(capacity-len(rom))
     sparse=('' if bank_map is None else f'#define CART_SPARSE_BANKS {len(bank_map)}u\n'
             'static const unsigned char cart_bank_map[] = {'+','.join(map(str,bank_map))+'};\n')
-    if a.lsdj_slot:sparse=f'#define CART_SLOT_CAPACITY {capacity}u\n#define CART_SLOT_PRODUCT "{LSDJ_SLOT_PRODUCT}"\n#define CART_SLOT_VERSION "{LSDJ_VERSION}"\n'
+    if a.lsdj_slot:sparse=f'#define CART_SLOT_CAPACITY {capacity}u\n#define CART_SLOT_PRODUCT "{LSDJ_SLOT_PRODUCT}"\n#define CART_SLOT_VERSION "{LSDJ_VERSION}"\n#define CART_SLOT_RELEASE "{LSDJ_RELEASE}"\n'
     (out/'cartridge.h').write_text('/* Local cartridge; never publish game ROMs. */\n'+sparse+'static const unsigned char cartridge[] = {\n'+
         ',\n'.join(','.join(str(b) for b in storage[i:i+32]) for i in range(0,len(storage),32))+'\n};\n')
     if a.target=='smk37':
@@ -153,7 +161,7 @@ def native(a,sources):
       'usb_updater':True,'save_persistence':'session RAM only'}
     result['app_bytes']=len(image)
     if a.lsdj_slot:
-        result.update(lsdj_slot=1,product=LSDJ_SLOT_PRODUCT,version=LSDJ_VERSION,cartridge='empty LSDj slot',
+        result.update(lsdj_slot=1,product=LSDJ_SLOT_PRODUCT,version=LSDJ_VERSION,release=LSDJ_RELEASE,cartridge='empty LSDj slot',
                       compatibility='experimental generic; verified cursor profile only, other memory helpers disabled')
     if a.target=='smk37':result.update(usb_protocol='smk37-ram-v2',product=loader['product'],loader=loader)
     (out/'manifest.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))

@@ -149,7 +149,7 @@ static void lsdj_ov_draw(lsdj_ov_t *o, uint16_t *scr, uint32_t now_ms) {
 enum { LSDJ_MSG_NOTE_MODE, LSDJ_MSG_BUTTON_MODE, LSDJ_MSG_OCT_DOWN, LSDJ_MSG_OCT_UP, LSDJ_MSG_OCT_BUTTONS,
        LSDJ_MSG_SAVING, LSDJ_MSG_SAVED, LSDJ_MSG_NO_CHANGES, LSDJ_MSG_SAVE_PLAYING, LSDJ_MSG_SAVE_FAILED,
        LSDJ_MSG_LOADED, LSDJ_MSG_SETTINGS_SAVED, LSDJ_MSG_SETTINGS_FAILED, LSDJ_MSG_SAVING_PLAYING,
-       LSDJ_MSG_COUNT };
+       LSDJ_MSG_NOTE_KEYBD, LSDJ_MSG_KEYBD_SET, LSDJ_MSG_COUNT };
 static const char *const lsdj_ov_msg[LSDJ_MSG_COUNT][2] = {
     {"NOTE MODE",        "SET LSDJ SYNC=KEYBD"},
     {"BUTTON MODE",      "KEYS = GAME BOY PAD"},
@@ -165,6 +165,8 @@ static const char *const lsdj_ov_msg[LSDJ_MSG_COUNT][2] = {
     {"SETTINGS SAVED",   0},
     {"SETTINGS NOT SAVED", "FLASH ERROR"},
     {"SAVING...",        "MUSIC KEEPS PLAYING"},
+    {"NOTE MODE",        "LSDJ SYNC: KEYBD"},
+    {"LSDJ SYNC SET",    "TO KEYBD FOR NOTES"},
 };
 static void lsdj_ov_say(lsdj_ov_t *o, unsigned msg, uint32_t now_ms) {
     if (msg < LSDJ_MSG_COUNT) lsdj_ov_show(o, lsdj_ov_msg[msg][0], lsdj_ov_msg[msg][1], now_ms);

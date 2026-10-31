@@ -8,7 +8,7 @@ ROOT=Path(__file__).resolve().parents[1]
 # (FM-1_992 on: FM-1_9NN overlaps other firmwares). LSDJ_VERSION is the short name the web page's link
 # (8 bytes in INFO) and the splash use. FM-1_993 went to a private Bluetooth build (since removed), so
 # FM-1_994 is the next public one.
-LSDJ_VERSION='FM-1_994'
+LSDJ_VERSION='FM-1_995'
 LSDJ_SLOT_PRODUCT='FM-1_537'+LSDJ_VERSION[5:].zfill(4)
 DEFAULT_ZIG=ROOT.parent/'Felucca/Felucca-website/build/wasm-tools/ziglang/zig.exe'
 # JieLi toolchain: $JIELI_TOOLCHAIN, else ~/.jieli/toolchain (Dinghy's get_toolchain.sh), else the upstream path.

@@ -44,6 +44,7 @@ void gp_set_fx(void (*fn)(const int16_t *s, int32_t *l, int32_t *r));
 uint8_t gp_wram_peek(uint16_t addr);   /* work RAM byte (C000-DFFF) */
 void gp_wram_poke(uint16_t addr, uint8_t v);   /* written before the next emulated frame */
 int gp_wram_poke_many(const uint16_t *addr, const uint8_t *v, uint32_t n);   /* all in the same frame */
+void gp_ie_or(uint8_t bits);   /* interrupt-enable bits, set before the next frame (after its pokes) */
 void gp_buttons(uint32_t pressed);
 void gp_pause(uint32_t paused);
 void gp_reset(void);

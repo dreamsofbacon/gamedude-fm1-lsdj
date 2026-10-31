@@ -3,7 +3,7 @@
 LSDJ Burrito runs [Little Sound Dj](https://www.littlesounddj.com) on the M-VAVE FM-1, played from the FM-1's own keys and knobs, with songs saved to the FM-1's flash. It adds per-channel effects (filters including notch and 24 dB low-pass, drive with soft / hard / fold / fuzz, warmth, lo-fi, an LFO to cutoff, volume or pan), a master echo and compressor, MIDI clock in and out, MIDI notes and CCs, themes, and experimental Bluetooth MIDI.
 
 - **Web page:** [dreamsofbacon.github.io/lsdj-burrito](https://dreamsofbacon.github.io/lsdj-burrito/): install or update LSDJ Burrito step by step with your own `lsdj.gb` (LSDj is not included, and your ROM never leaves your computer), then control effects, songs, colours and settings over USB (or Bluetooth).
-- **Status:** alpha (FM-1_994, package identity FM-1_5370994). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
+- **Status:** alpha (FM-1_995, package identity FM-1_5370995). Installing from the web page with your own LSDj is experimental; LSDj 9.3.9 is the verified version.
 - **Based on** [GameDude](https://github.com/ChanceTheMaker/gamedude-fm1-smk) by ChanceTheMaker (GPL-3.0). No Bluetooth (removed in FM-1_994, with GameDude's game library loader and website). The firmware README follows below.
 
 Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
@@ -11,6 +11,17 @@ Not affiliated with M-VAVE, Johan Kotlinski (LSDj) or Nintendo.
 ---
 
 # LSDJ Burrito firmware (based on GameDude for FM-1 / SMK37)
+
+## LSDj Burrito: note mode sets LSDj's SYNC to KEYBD (FM-1_995)
+
+- The FM-1's keys (note mode) and incoming MIDI notes reach LSDj as a PS/2 keyboard on the link
+  port, which LSDj only reads with PROJECT > SYNC = KEYBD. With LSDj 9.3.9 and SYNC OFF, the FM-1
+  now sets it by itself when you press HOME for note mode, play a note or send a MIDI note, and
+  says LSDJ SYNC SET / TO KEYBD FOR NOTES. It does what LSDj's PROJECT screen does
+  (harness/keybd_auto.sh): the song's SYNC byte, LSDj's working copy (WRAM CB66), the interrupt
+  bits LSDj builds IE from (CB6D) and IE's serial bit at once (gp_ie_or). SYNC MIDI and LSDJ are
+  left alone (MIDI clock in and out need them); note mode then says SET LSDJ SYNC=KEYBD, as on
+  other LSDj versions. The setting is part of the song, so SAVE keeps it.
 
 ## LSDj Burrito: no Bluetooth (FM-1_994)
 
@@ -248,7 +259,7 @@ and template-combination confirmation are separate from host/emulator checks.
 
 ## LSDj Burrito: experimental webpage template
 
-This fork also builds the ROM-free FM-1_994 (package identity FM-1_5370994) LSDj template for the sibling Burrito
+This fork also builds the ROM-free FM-1_995 (package identity FM-1_5370995) LSDj template for the sibling Burrito
 website.
 Local ROM builds (never published) keep FM-1_9NN in firmware/fm1_recovery.h.
 

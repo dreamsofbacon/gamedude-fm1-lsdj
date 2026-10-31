@@ -352,6 +352,7 @@ static uint32_t clk_ly = 0xFFu, clk_unarmed;
 #define POKE_Q 16u
 static uint32_t poke_q[POKE_Q];
 static volatile uint32_t poke_head, poke_tail;
+static volatile uint8_t ie_or;   /* gp_ie_or: interrupt-enable bits to set before the next frame */
 void gp_link_tick_at(uint32_t pos) {
     uint32_t t = clk_tail;
     if (t - clk_head >= CLK_Q) return;
@@ -406,6 +407,7 @@ GP_RAM static int gp_frame_ram(void) {
     gb.gb_frame=0;
     unsigned steps=0;
     while (poke_head != poke_tail) { uint32_t p = poke_q[poke_head % POKE_Q]; gb.wram[(p >> 8) & 0x1FFFu] = (uint8_t)p; BARRIER(); poke_head++; }   /* gp_wram_poke */
+    if (ie_or) { uint8_t b = ie_or; ie_or = 0; gb.hram_io[IO_IE] |= b; }   /* gp_ie_or, after the pokes */
     kb_prev_cyc = kb_frame_cycle();
     /* Not in LSDj's keyboard mode (nothing arms the serial port): drop queued keys
        after ~1 s instead of firing them in a burst later. */
@@ -457,6 +459,9 @@ void gp_wram_poke(uint16_t addr, uint8_t v) {
     if (t - poke_head >= POKE_Q) return;
     poke_q[t % POKE_Q] = (uint32_t)(addr - 0xC000u) << 8 | v; BARRIER(); poke_tail = t + 1u;
 }
+/* Interrupt-enable bits (IE, FFFF) set before the next frame, after that frame's
+   gp_wram_poke writes (LSDj SYNC = KEYBD: the serial interrupt, 0x08). */
+void gp_ie_or(uint8_t bits) { BARRIER(); ie_or = (uint8_t)(ie_or | bits); }
 /* Several writes that land in the same frame (published together), or none if
    they do not all fit. Returns 1 if queued. */
 int gp_wram_poke_many(const uint16_t *addr, const uint8_t *v, uint32_t n) {

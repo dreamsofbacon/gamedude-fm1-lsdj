@@ -215,6 +215,7 @@ static void display_frame(void){lcd_blit(0,12,240,216,screen);}
    to the note's; key presses only (LSDj's keyboard has no note-off). Notes below 48
    are ignored, so low keys never turn into LSDj's mute/cursor commands. */
 static void lsdj_keybd_note(int note,int on);
+static void keybd_sync_note(void);
 #define LSDJ_KEYBD_NOTE(n,on) lsdj_keybd_note((n),(on))
 #include "fm1_lsdj_input.h"
 static const uint8_t kb_note_map[24]={0x1A,0x1B,0x22,0x23,0x21,0x2A,0x34,0x32,0x33,0x31,0x3B,0x3A,
@@ -224,7 +225,9 @@ static const uint8_t kb_note_map[24]={0x1A,0x1B,0x22,0x23,0x21,0x2A,0x34,0x32,0x
 static int kb_octave=-1;  /* LSDj's keyboard octave as we last set it; -1 = not synced yet */
 static uint8_t sync_midi;   /* LSDj's SYNC is MIDI: the link port carries clock, not keys */
 static void lsdj_keybd_note(int note,int on){
-    if(!on||note<48||sync_midi)return;
+    if(!on)return;
+    keybd_sync_note();   /* LSDj SYNC OFF: KEYBD now (FM-1_995) */
+    if(note<48||sync_midi)return;
     if(kb_octave<0){for(int i=0;i<5;i++)gp_keybd_send(KB_OCT_DN);kb_octave=0;}  /* clamp to 0, as Arduinoboy */
     int n=note-48,oct=n/12;
     while(kb_octave<oct){gp_keybd_send(KB_OCT_UP);kb_octave++;}
@@ -349,7 +352,7 @@ static uint32_t fx_keys_prev;
    playing flags (4 WRAM bytes, one per channel) with harness/lsdj_drive.c.
    0 = unknown. */
 static uint16_t cursor_addr,tempo_addr,sync_off,armed_addr,row_addr,live_addr,songrow_addr,chainpos_addr,songtab_off,
-                period_addr,songtempo_off,screen_addr;
+                period_addr,songtempo_off,screen_addr,synclive_addr,syncmask_addr;
 #define LSDJ_SYNC_MIDI 3u
 #define LSDJ_SYNC_LSDJ 1u
 #define LSDJ_SYNC_KEYBD 5u
@@ -358,8 +361,10 @@ static void cursor_detect(void){
        rows, chainpos: 4 places in the chain, songtab: the song table in cartridge RAM
        (harness/lsdj_drive.c rec / peek / sdump, find_chainpos.py) */
     /* period: the tempo period (16 bits), songtempo: the song's tempo in cartridge RAM */
-    static const struct {const char *title;uint16_t cursor,tempo,sync,armed,row,live,songrow,chainpos,songtab,period,songtempo,screen;} known[]={
-        {"LSDj-v9.3.9",0xC41D,0xC529,0x3FBD,0xC0E0,0xC16C,0xC528,0xC200,0xC17C,0x1290,0xC954,0x3FB4,0xC401}};
+    /* synclive: LSDj's working copy of SYNC; syncmask: the interrupt bits it builds IE from on a
+       screen change (harness/keybd_auto.sh, by diffing WRAM around its PROJECT screen) */
+    static const struct {const char *title;uint16_t cursor,tempo,sync,armed,row,live,songrow,chainpos,songtab,period,songtempo,screen,synclive,syncmask;} known[]={
+        {"LSDj-v9.3.9",0xC41D,0xC529,0x3FBD,0xC0E0,0xC16C,0xC528,0xC200,0xC17C,0x1290,0xC954,0x3FB4,0xC401,0xCB66,0xCB6D}};
 #ifdef CART_SLOT_CAPACITY
     /* Generic builds: the browser marks the slot with profile 1 only when the program
        banks' SHA-256 matches the verified LSDj 9.3.9 program (lsdj_slot.h byte 148), never
@@ -380,10 +385,28 @@ static void cursor_detect(void){
             cursor_addr=known[i].cursor;tempo_addr=known[i].tempo;sync_off=known[i].sync;armed_addr=known[i].armed;
             row_addr=known[i].row;live_addr=known[i].live;
             songrow_addr=known[i].songrow;chainpos_addr=known[i].chainpos;songtab_off=known[i].songtab;
-            period_addr=known[i].period;songtempo_off=known[i].songtempo;screen_addr=known[i].screen;return;
+            period_addr=known[i].period;songtempo_off=known[i].songtempo;screen_addr=known[i].screen;
+            synclive_addr=known[i].synclive;syncmask_addr=known[i].syncmask;return;
         }
     }
 }
+/* Note mode needs LSDj's SYNC on KEYBD (the keys reach LSDj through the link port). LSDj 9.3.9 with
+   SYNC OFF: set here as LSDj's own PROJECT screen does (harness/keybd_auto.sh): the song's SYNC
+   byte, LSDj's working copy, the interrupt bits it builds IE from, and IE's serial bit at once.
+   MIDI and LSDJ are left as they are (MIDI clock in / out need them); the message says how.
+   0: KEYBD already, 1: set just now, 2: not set (another SYNC, or an LSDj without the addresses). */
+static int keybd_sync(void){
+    if(!sync_off)return 2;
+    uint8_t s=gp_save_data()[sync_off];
+    if(s==LSDJ_SYNC_KEYBD)return 0;
+    if(s!=0u||!synclive_addr||!syncmask_addr)return 2;
+    const uint16_t a[2]={synclive_addr,syncmask_addr};
+    const uint8_t v[2]={LSDJ_SYNC_KEYBD,(uint8_t)(gp_wram_peek(syncmask_addr)|0x08u)};
+    if(!gp_wram_poke_many(a,v,2u))return 2;
+    gp_ie_or(0x08u);gp_save_data()[sync_off]=LSDJ_SYNC_KEYBD;
+    return 1;
+}
+static void keybd_sync_note(void){if(keybd_sync()==1)lsdj_ov_say(&ov,LSDJ_MSG_KEYBD_SET,fm1_ms);}
 /* MIDI clock sync (firmware/lsdj_midisync.h): USB MIDI clock and transport. */
 #include "lsdj_midisync.h"
 static lsdj_ms_t msync;
@@ -430,6 +453,7 @@ static void midi_in(uint32_t pkt,uint32_t at_ms,uint32_t src){
     switch(lsdj_midi_route(&midi,pkt,src)){
     case LSDJ_MIDI_CLOCK:case LSDJ_MIDI_TRANSPORT:break;   /* below */
     case LSDJ_MIDI_NOTE:
+        keybd_sync_note();
         if(sync_off&&gp_save_data()[sync_off]!=LSDJ_SYNC_KEYBD&&!midi_note_told){
             midi_note_told=1;lsdj_ov_show(&ov,"MIDI NOTES: SET","LSDJ SYNC TO KEYBD",fm1_ms);
         }
@@ -1048,7 +1072,9 @@ static void fm1_input_frame(void){
     input_buttons=lsdj_input_frame(&lsdj_in,key_lo,panel_now,enc);
     /* On-screen messages for what the FM-1's own buttons just did. */
     if(lsdj_in.mode!=mode_was){
-        lsdj_ov_say(&ov,lsdj_in.mode==LSDJ_KEYS_NOTES?LSDJ_MSG_NOTE_MODE:LSDJ_MSG_BUTTON_MODE,fm1_ms);
+        if(lsdj_in.mode==LSDJ_KEYS_NOTES){int k=keybd_sync();
+            lsdj_ov_say(&ov,k==1?LSDJ_MSG_KEYBD_SET:k==0?LSDJ_MSG_NOTE_KEYBD:LSDJ_MSG_NOTE_MODE,fm1_ms);}
+        else lsdj_ov_say(&ov,LSDJ_MSG_BUTTON_MODE,fm1_ms);
         mode_sweep=feat.v[LSDJ_FEAT_ANIM];
     }
     else if(lsdj_in.octave!=oct_was)
